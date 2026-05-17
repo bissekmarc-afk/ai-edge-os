@@ -1,6 +1,7 @@
 "use client"
 
 import { usePathname } from "next/navigation"
+import { useTransition } from "react"
 import {
   LayoutDashboard,
   CheckSquare,
@@ -10,9 +11,12 @@ import {
   Settings,
   PanelLeftClose,
   PanelLeftOpen,
+  LogOut,
+  Loader,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SidebarNavItem } from "@/components/layout/sidebar-nav-item"
+import { signOut } from "@/app/login/actions"
 
 interface SidebarProps {
   collapsed: boolean
@@ -30,6 +34,7 @@ const NAV_ITEMS = [
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const pathname = usePathname()
+  const [isPending, startTransition] = useTransition()
 
   return (
     <aside
@@ -71,7 +76,24 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         ))}
       </nav>
 
-      <div className="shrink-0 border-t border-sidebar-border p-2">
+      <div className="shrink-0 space-y-0.5 border-t border-sidebar-border p-2">
+        <button
+          onClick={() => startTransition(() => signOut())}
+          disabled={isPending}
+          aria-label="Déconnexion"
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg px-2 py-2 text-sm text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-50",
+            collapsed && "justify-center"
+          )}
+        >
+          {isPending ? (
+            <Loader className="size-4 animate-spin" />
+          ) : (
+            <LogOut className="size-4 shrink-0" />
+          )}
+          {!collapsed && <span className="truncate">Déconnexion</span>}
+        </button>
+
         <button
           onClick={onToggle}
           aria-label={collapsed ? "Étendre la sidebar" : "Réduire la sidebar"}

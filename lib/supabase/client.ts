@@ -1,9 +1,12 @@
-// Placeholder — Phase API/Supabase integration — not used by mock MVP.
 import { createBrowserClient } from "@supabase/ssr"
 
-export function createSupabaseBrowserClient() {
+let browserClient: ReturnType<typeof createBrowserClient> | null = null
+
+export function getSupabaseBrowserClient() {
+  if (browserClient) return browserClient
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !key) return null
-  return createBrowserClient(url, key)
+  browserClient = createBrowserClient(url, key)
+  return browserClient
 }
