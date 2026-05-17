@@ -1,65 +1,133 @@
-import Image from "next/image";
+import { CheckSquare, DollarSign, BookOpen, Dumbbell, Brain } from "lucide-react"
+import { CommandCenterHeader } from "@/components/dashboard/command-center-header"
+import { AIDailyBrief } from "@/components/dashboard/ai-daily-brief"
+import { KpiCard } from "@/components/dashboard/kpi-card"
+import { TodayFocus } from "@/components/dashboard/today-focus"
+import { LifeBlockCard } from "@/components/dashboard/life-block-card"
+import { HabitsTracker } from "@/components/dashboard/habits-tracker"
+import { SyncActivityFeed } from "@/components/dashboard/sync-activity-feed"
+import {
+  getTopTasks,
+  getMonthlyBudgetSummary,
+  getReadingSummary,
+  getTrainingSummary,
+  getMemorySummary,
+  mockHabits,
+  mockGymSessions,
+  mockBoxingSessions,
+  mockReadingItems,
+  getSyncActivity,
+} from "@/lib/mock-data"
 
-export default function Home() {
+export default function CommandCenterPage() {
+  const topTasks = getTopTasks(5)
+  const budget = getMonthlyBudgetSummary()
+  const reading = getReadingSummary()
+  const training = getTrainingSummary()
+  const memory = getMemorySummary()
+  const syncActivities = getSyncActivity()
+
+  const formatEur = (n: number) =>
+    new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+      maximumFractionDigits: 0,
+    }).format(n)
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div className="flex flex-col gap-6">
+      <CommandCenterHeader />
+
+      <AIDailyBrief />
+
+      <section>
+        <h2 className="mb-3 text-base font-semibold text-foreground">Vue d&apos;ensemble</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <KpiCard
+            title="Tâches actives"
+            value={String(topTasks.length)}
+            sub="5 prioritaires"
+            icon={<CheckSquare className="size-4" />}
+            trend="neutral"
+          />
+          <KpiCard
+            title="Budget mai"
+            value={formatEur(budget.balance)}
+            sub={`Dépenses : ${formatEur(budget.expenses)}`}
+            icon={<DollarSign className="size-4" />}
+            trend="up"
+          />
+          <KpiCard
+            title="Lecture"
+            value={`${reading.reading} en cours`}
+            sub={`${reading.completed} terminés`}
+            icon={<BookOpen className="size-4" />}
+            trend="up"
+          />
+          <KpiCard
+            title="Entraînement"
+            value={`${training.gymSessions + training.boxingSessions}`}
+            sub={`${Math.round(training.totalMinutes / 60)}h ce mois`}
+            icon={<Dumbbell className="size-4" />}
+            trend="up"
+          />
+          <KpiCard
+            title="Mémoire"
+            value={`${memory.confirmed}/${memory.total}`}
+            sub="entrées confirmées"
+            icon={<Brain className="size-4" />}
+            trend="neutral"
+          />
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      <TodayFocus tasks={topTasks} />
+
+      <section>
+        <h2 className="mb-3 text-base font-semibold text-foreground">Life Blocks</h2>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <LifeBlockCard
+            title="Lecture"
+            icon={<BookOpen className="size-4 text-[var(--ai-accent)]" />}
+            stats={[
+              { label: "En cours", value: `${reading.reading} livre${reading.reading > 1 ? "s" : ""}` },
+              { label: "Terminés", value: String(reading.completed) },
+              { label: "Progression moy.", value: `${reading.avgProgress}%` },
+              { label: "À lire", value: String(mockReadingItems.filter((r) => r.status === "to_read").length) },
+            ]}
+            progress={reading.avgProgress}
+            progressLabel="Progression lecture en cours"
+          />
+          <LifeBlockCard
+            title="Finance"
+            icon={<DollarSign className="size-4 text-[var(--success)]" />}
+            stats={[
+              { label: "Revenus", value: formatEur(budget.income) },
+              { label: "Dépenses", value: formatEur(budget.expenses) },
+              { label: "Solde", value: formatEur(budget.balance) },
+              { label: "Épargne", value: "20%" },
+            ]}
+            progress={Math.round((budget.expenses / budget.income) * 100)}
+            progressLabel="Dépenses vs revenus"
+          />
+          <LifeBlockCard
+            title="Gym & Boxe"
+            icon={<Dumbbell className="size-4 text-[var(--warning)]" />}
+            stats={[
+              { label: "Séances gym", value: String(mockGymSessions.length) },
+              { label: "Séances boxe", value: String(mockBoxingSessions.length) },
+              { label: "Total", value: `${Math.round(training.totalMinutes / 60)}h` },
+              { label: "Dernière", value: new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" }).format(new Date(training.lastSession)) },
+            ]}
+            progress={training.gymSessions >= 3 ? 100 : Math.round((training.gymSessions / 3) * 100)}
+            progressLabel="Objectif 3 séances gym/sem."
+          />
         </div>
-      </main>
+      </section>
+
+      <HabitsTracker habits={mockHabits} />
+
+      <SyncActivityFeed activities={syncActivities} />
     </div>
-  );
+  )
 }
