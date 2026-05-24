@@ -2,47 +2,66 @@
 
 import { useEffect, useState } from "react"
 import {
-  ResponsiveContainer,
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
+  ResponsiveContainer,
 } from "recharts"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { CashflowMonth } from "@/lib/queries/finance-dashboard"
+import type { MonthlySummary } from "@/lib/finance/types"
 
-// Fixed colors — work in both light and dark modes
-const COLOR_INCOME   = "#22c55e"  // green-500
-const COLOR_EXPENSES = "#f97316"  // orange-500
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-function formatEurShort(value: number): string {
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k€`
-  return `${value}€`
+const EUR = new Intl.NumberFormat("fr-FR", {
+  style: "currency",
+  currency: "EUR",
+  maximumFractionDigits: 0,
+})
+
+const COLOR_INCOME  = "#22c55e"   // green-500
+const COLOR_OPEX    = "#f97316"   // orange-500
+const COLOR_DEBT    = "#a855f7"   // purple-500
+const COLOR_NCF     = "#60a5fa"   // blue-400
+
+const LABELS: Record<string, string> = {
+  grossIncome: "Revenus",
+  opex:        "Dép. opérat.",
+  debtService: "Debt Service",
+  netCashFlow: "Net Cash Flow",
 }
 
-interface CashflowChartProps {
-  data: CashflowMonth[]
+function fmtShort(v: number): string {
+  const abs = Math.abs(v)
+  if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M€`
+  if (abs >= 1_000)     return `${(v / 1_000).toFixed(1)}k€`
+  return `${v}€`
 }
 
-export function CashflowChart({ data }: CashflowChartProps) {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+interface PLCashflowChartProps {
+  data: MonthlySummary[]
+}
+
+export function PLCashflowChart({ data }: PLCashflowChartProps) {
   // Prevents SSR / hydration mismatch — Recharts uses ResizeObserver
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
-  if (!mounted) {
-    return <Skeleton className="h-60 w-full rounded-xl" />
-  }
+  if (!mounted) return <Skeleton className="h-64 w-full rounded-xl" />
 
   return (
-    <div className="h-60 w-full">
+    <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart
+        <ComposedChart
           data={data}
-          margin={{ top: 4, right: 4, left: 0, bottom: 0 }}
-          barCategoryGap="30%"
+          margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+          barCategoryGap="28%"
           barGap={2}
         >
           <CartesianGrid
@@ -53,25 +72,21 @@ export function CashflowChart({ data }: CashflowChartProps) {
           />
           <XAxis
             dataKey="monthLabel"
-            tick={{ fontSize: 11, fill: "currentColor", opacity: 0.5 }}
+            tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
             axisLine={false}
             tickLine={false}
           />
           <YAxis
-            tickFormatter={formatEurShort}
-            tick={{ fontSize: 11, fill: "currentColor", opacity: 0.5 }}
+            tickFormatter={fmtShort}
+            tick={{ fontSize: 10, fill: "currentColor", opacity: 0.5 }}
             axisLine={false}
             tickLine={false}
-            width={42}
+            width={46}
           />
           <Tooltip
             formatter={(value, name) => [
-              new Intl.NumberFormat("fr-FR", {
-                style: "currency",
-                currency: "EUR",
-                maximumFractionDigits: 0,
-              }).format(Number(value ?? 0)),
-              name === "income" ? "Revenus" : "Dépenses",
+              EUR.format(Number(value ?? 0)),
+              LABELS[String(name)] ?? String(name),
             ]}
             labelStyle={{ fontWeight: 600, marginBottom: 4 }}
             contentStyle={{
@@ -81,14 +96,37 @@ export function CashflowChart({ data }: CashflowChartProps) {
             }}
           />
           <Legend
-            formatter={(value) => (value === "income" ? "Revenus" : "Dépenses")}
-            iconType="square"
+            formatter={(v: string) => LABELS[v] ?? v}
             iconSize={10}
-            wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+            wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
           />
-          <Bar dataKey="income"   name="income"   fill={COLOR_INCOME}   radius={[3, 3, 0, 0]} />
-          <Bar dataKey="expenses" name="expenses" fill={COLOR_EXPENSES} radius={[3, 3, 0, 0]} />
-        </BarChart>
+          <Bar
+            dataKey="grossIncome"
+            name="grossIncome"
+            fill={COLOR_INCOME}
+            radius={[3, 3, 0, 0]}
+          />
+          <Bar
+            dataKey="opex"
+            name="opex"
+            fill={COLOR_OPEX}
+            radius={[3, 3, 0, 0]}
+          />
+          <Bar
+            dataKey="debtService"
+            name="debtService"
+            fill={COLOR_DEBT}
+            radius={[3, 3, 0, 0]}
+          />
+          <Line
+            dataKey="netCashFlow"
+            name="netCashFlow"
+            stroke={COLOR_NCF}
+            strokeWidth={2}
+            dot={{ r: 3, fill: COLOR_NCF }}
+            type="monotone"
+          />
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   )
