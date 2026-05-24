@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Send, X, Sparkles, ChevronUp } from "lucide-react"
+import { Send, X, Sparkles, ChevronUp, Check, Brain } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { mockAICommands } from "@/lib/mock-data"
 
@@ -9,14 +9,19 @@ interface AICommandBarProps {
   marginLeft: number
 }
 
-const MOCK_RESPONSE =
-  "Voici ton brief du jour : 5 tâches prioritaires aujourd'hui dont 2 urgentes. Budget mai en bonne voie (−18% dépenses vs mois dernier). Streak lecture : 21 jours. Prochaine séance de boxe recommandée ce soir. Bonne journée ! 💡"
+interface MemorySuggestion {
+  title: string
+  content: string
+  category: string
+}
 
 export function AICommandBar({ marginLeft }: AICommandBarProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [response, setResponse] = useState("")
   const [isTyping, setIsTyping] = useState(false)
+  const [suggestions, setSuggestions] = useState<MemorySuggestion[]>([])
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -24,6 +29,8 @@ export function AICommandBar({ marginLeft }: AICommandBarProps) {
     setIsOpen(false)
     setResponse("")
     setQuery("")
+    setSuggestions([])
+    setIsAnalyzing(false)
   }, [])
 
   useEffect(() => {
@@ -54,31 +61,93 @@ export function AICommandBar({ marginLeft }: AICommandBarProps) {
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
-  function simulateResponse(prompt: string) {
+  async function fetchMemorySuggestions(prompt: string, claudeResponse: string) {
+    setIsAnalyzing(true)
+    try {
+      const res = await fetch("/api/memory/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: prompt, response: claudeResponse }),
+      })
+      if (res.ok) {
+        const { suggestions: s } = await res.json()
+        if (Array.isArray(s) && s.length > 0) setSuggestions(s)
+      }
+    } catch {
+      // silent — suggestions are optional
+    } finally {
+      setIsAnalyzing(false)
+    }
+  }
+
+  async function askClaude(prompt: string) {
     if (!prompt.trim()) return
     setIsTyping(true)
     setResponse("")
-    setTimeout(() => {
+    setSuggestions([])
+    setIsAnalyzing(false)
+
+    try {
+      const res = await fetch("/api/claude/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: prompt }),
+      })
+
+      if (!res.ok || !res.body) {
+        const { error } = await res.json().catch(() => ({ error: "Erreur inconnue" }))
+        setResponse(error ?? "Erreur lors de la requête")
+        setIsTyping(false)
+        return
+      }
+
       setIsTyping(false)
-      setResponse(
-        prompt.toLowerCase().includes("budget")
-          ? "Budget mai : revenus 3 800 € · dépenses 2 158,80 € · solde +1 641,20 €. Taux d'épargne : 20 %. Objectif atteint ✅"
-          : prompt.toLowerCase().includes("lecture")
-          ? "En cours : Atomic Habits (65%) + Thinking in Systems (30%). Terminés ce mois : Zero to One. Streak : 21 jours 🔥"
-          : MOCK_RESPONSE
-      )
-    }, 900)
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let text = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        text += decoder.decode(value, { stream: true })
+        setResponse(text)
+      }
+
+      // Analyse la conversation pour proposer des souvenirs
+      if (text) fetchMemorySuggestions(prompt, text)
+    } catch {
+      setResponse("Impossible de joindre l'API Claude.")
+      setIsTyping(false)
+    }
+  }
+
+  async function handleConfirmMemory(index: number) {
+    const suggestion = suggestions[index]
+    setSuggestions((prev) => prev.filter((_, i) => i !== index))
+    try {
+      await fetch("/api/memory/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(suggestion),
+      })
+    } catch {
+      // silent
+    }
+  }
+
+  function handleDismissSuggestion(index: number) {
+    setSuggestions((prev) => prev.filter((_, i) => i !== index))
   }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    simulateResponse(query)
+    askClaude(query)
   }
 
   function handleQuickCommand(prompt: string) {
     setQuery(prompt)
     setIsOpen(true)
-    simulateResponse(prompt)
+    askClaude(prompt)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
@@ -102,9 +171,56 @@ export function AICommandBar({ marginLeft }: AICommandBarProps) {
               Claude réfléchit…
             </div>
           )}
+
           {response && !isTyping && (
             <div className="max-h-[120px] overflow-y-auto py-2 text-sm text-foreground leading-relaxed">
               {response}
+            </div>
+          )}
+
+          {isAnalyzing && !isTyping && (
+            <p className="pb-1 text-xs italic text-muted-foreground/60">
+              Analyse de la conversation…
+            </p>
+          )}
+
+          {suggestions.length > 0 && (
+            <div className="border-t border-[var(--panel-border)] pt-2 pb-1">
+              <div className="mb-1.5 flex items-center gap-1.5">
+                <Brain className="size-3 text-[var(--ai-accent)]" />
+                <span className="text-xs font-medium text-muted-foreground">
+                  Mémoriser ?
+                </span>
+              </div>
+              <div className="flex flex-col gap-1">
+                {suggestions.map((s, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-2 rounded-md bg-muted/50 px-2 py-1.5"
+                  >
+                    <span className="flex-1 truncate text-xs text-foreground">
+                      {s.title}
+                    </span>
+                    <span className="shrink-0 rounded px-1 py-0.5 text-[10px] text-muted-foreground bg-muted">
+                      {s.category}
+                    </span>
+                    <button
+                      onClick={() => handleConfirmMemory(i)}
+                      aria-label="Confirmer"
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-emerald-600 transition-colors hover:bg-emerald-100 hover:text-emerald-700 dark:hover:bg-emerald-950"
+                    >
+                      <Check className="size-3" />
+                    </button>
+                    <button
+                      onClick={() => handleDismissSuggestion(i)}
+                      aria-label="Ignorer"
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

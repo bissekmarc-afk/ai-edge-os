@@ -18,10 +18,17 @@ import {
   mockReadingItems,
   getSyncActivity,
 } from "@/lib/mock-data"
+import { getTasksFromSupabase } from "@/lib/queries/tasks"
+import { getBudgetSummaryFromSupabase } from "@/lib/queries/finance"
 
-export default function CommandCenterPage() {
-  const topTasks = getTopTasks(5)
-  const budget = getMonthlyBudgetSummary()
+export default async function CommandCenterPage() {
+  const [supabaseTasks, supabaseBudget, mockTopTasks] = await Promise.all([
+    getTasksFromSupabase(5),
+    getBudgetSummaryFromSupabase(),
+    Promise.resolve(getTopTasks(5)),
+  ])
+  const topTasks = supabaseTasks.length > 0 ? supabaseTasks : mockTopTasks
+  const budget = supabaseBudget ?? getMonthlyBudgetSummary()
   const reading = getReadingSummary()
   const training = getTrainingSummary()
   const memory = getMemorySummary()
