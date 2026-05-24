@@ -3,11 +3,18 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
 export async function proxy(request: NextRequest) {
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_ANON_KEY
+  if (!supabaseUrl || !supabaseKey) {
+    // Supabase not configured — let the request through without auth check
+    return NextResponse.next({ request })
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -32,6 +39,10 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
+
+  // API routes manage their own session checks — don't redirect them to /login
+  if (pathname.startsWith("/api/")) return supabaseResponse
+
   const isAuthRoute = pathname === "/login" || pathname.startsWith("/auth/")
 
   if (!user && !isAuthRoute) {
