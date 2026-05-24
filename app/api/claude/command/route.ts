@@ -3,8 +3,6 @@ import { getTasksFromSupabase } from "@/lib/queries/tasks"
 import { getBudgetSummaryFromSupabase } from "@/lib/queries/finance"
 import { getConfirmedMemories } from "@/lib/queries/memory"
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
 
 function sortTasks<T extends { priority: string; dueDate: string }>(tasks: T[]): T[] {
@@ -70,6 +68,8 @@ export async function POST(request: Request) {
   if (!apiKey || apiKey === "your_anthropic_api_key_here") {
     return Response.json({ error: "ANTHROPIC_API_KEY non configurée" }, { status: 503 })
   }
+
+  const client = new Anthropic({ apiKey })
 
   let query: string
   try {

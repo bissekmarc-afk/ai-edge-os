@@ -15,6 +15,7 @@ export async function GET() {
       GOOGLE_SHEETS_SPREADSHEET_ID:  peek(process.env.GOOGLE_SHEETS_SPREADSHEET_ID),
       GOOGLE_SERVICE_ACCOUNT_EMAIL:  peek(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
       GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: peek(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY),
+      ANTHROPIC_API_KEY:                  peek(process.env.ANTHROPIC_API_KEY),
       NODE_ENV: process.env.NODE_ENV,
     },
   })
