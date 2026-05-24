@@ -25,11 +25,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Only available in development" }, { status: 403 })
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const supabaseUrl = process.env.SUPABASE_URL
+  const supabaseKey = process.env.SUPABASE_ANON_KEY
   if (!supabaseUrl || !supabaseKey) {
     return NextResponse.json(
-      { error: "Supabase not configured", detail: "NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is missing from the environment" },
+      { error: "Supabase not configured", detail: "SUPABASE_URL or SUPABASE_ANON_KEY is missing from the environment" },
       { status: 503 }
     )
   }

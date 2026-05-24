@@ -100,12 +100,12 @@ export async function POST(request: NextRequest) {
   }
   console.log(`[sync/google-sheets] spreadsheetId=${spreadsheetId}`)
 
-  const supabaseUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  const supabaseUrl  = process.env.SUPABASE_URL
+  const supabaseKey  = process.env.SUPABASE_ANON_KEY
   if (!supabaseUrl || !supabaseKey) {
-    console.error("[sync/google-sheets] Supabase env vars missing — NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY not set")
+    console.error("[sync/google-sheets] Supabase env vars missing — SUPABASE_URL or SUPABASE_ANON_KEY not set")
     return NextResponse.json(
-      { error: "Supabase not configured", detail: "NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY is missing from the environment" },
+      { error: "Supabase not configured", detail: "SUPABASE_URL or SUPABASE_ANON_KEY is missing from the environment" },
       { status: 503 }
     )
   }
