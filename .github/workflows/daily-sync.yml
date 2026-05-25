@@ -1,0 +1,30 @@
+name: Daily Sync
+
+on:
+  schedule:
+    - cron: "0 5 * * *"   # 5h00 UTC chaque jour
+  workflow_dispatch:        # déclenchement manuel
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Trigger cron sync
+        run: |
+          HTTP_STATUS=$(curl --silent --output /tmp/sync_response.json \
+            --write-out "%{http_code}" \
+            --max-time 30 \
+            --request POST "${{ secrets.SYNC_URL }}" \
+            --header "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            --header "Content-Type: application/json")
+
+          echo "HTTP status: $HTTP_STATUS"
+          echo "Response:"
+          cat /tmp/sync_response.json
+
+          if [ "$HTTP_STATUS" -lt 200 ] || [ "$HTTP_STATUS" -ge 300 ]; then
+            echo "Sync failed with status $HTTP_STATUS"
+            exit 1
+          fi
