@@ -11,19 +11,28 @@ type Phase =
   | { type: "done"; deleted: number; synced: number }
   | { type: "error"; message: string; detail?: string }
 
-async function callRoute(url: string): Promise<{ ok: boolean; status: number; body: Record<string, unknown> }> {
+// Typed shapes for the two API responses this component calls
+interface ResetBody  { deleted?: number; error?: string; detail?: string }
+interface SyncBody   { synced?: number; parsed?: number; error?: string; detail?: string; _raw?: string }
+
+async function callRoute<T extends ResetBody | SyncBody>(
+  url: string,
+): Promise<{ ok: boolean; status: number; body: T }> {
   const res = await fetch(url, { method: "POST" })
-  let body: Record<string, unknown> = {}
+  let body = {} as T
   try {
-    body = await res.json()
-  } catch {
-    // Non-JSON response (HTML error page, timeout, etc.) — capture raw text
-    try {
-      const text = await res.text()
-      body = { _raw: text.slice(0, 300) }
-    } catch {
-      body = { _raw: "(unreadable body)" }
+    // Read the stream once as text, then parse — avoids body-already-consumed
+    // if JSON.parse throws on non-JSON responses (HTML error pages, etc.)
+    const text = await res.text()
+    if (text) {
+      try {
+        body = JSON.parse(text) as T
+      } catch {
+        body = { _raw: text.slice(0, 300) } as T
+      }
     }
+  } catch {
+    body = { _raw: "(unreadable body)" } as T
   }
   console.log(`[ResetResync] ${url} → ${res.status}`, body)
   return { ok: res.ok, status: res.status, body }
@@ -41,33 +50,33 @@ export function ResetResyncButton() {
       setPhase({ type: "resetting" })
       console.log("[ResetResync] Starting reset…")
 
-      const reset = await callRoute("/api/finance/reset")
+      const reset = await callRoute<ResetBody>("/api/finance/reset")
       if (!reset.ok) {
-        const msg = (reset.body.error as string) ?? `Reset failed`
-        const detail = (reset.body.detail as string) ?? `HTTP ${reset.status}`
+        const msg    = reset.body.error  ?? `Reset failed`
+        const detail = reset.body.detail ?? `HTTP ${reset.status}`
         console.error("[ResetResync] Reset failed:", reset.body)
         setPhase({ type: "error", message: msg, detail })
         return
       }
 
-      const deleted = (reset.body.deleted as number) ?? 0
+      const deleted = reset.body.deleted ?? 0
       console.log(`[ResetResync] Reset OK — ${deleted} rows deleted`)
 
       // ── Step 2: sync ─────────────────────────────────────────────────────────
       setPhase({ type: "syncing", deleted })
       console.log("[ResetResync] Starting sync…")
 
-      const sync = await callRoute("/api/sync/google-sheets")
+      const sync = await callRoute<SyncBody>("/api/sync/google-sheets")
       if (!sync.ok) {
-        const msg = (sync.body.error as string) ?? `Sync failed`
-        const detail = (sync.body.detail as string) ?? (sync.body._raw as string) ?? `HTTP ${sync.status}`
+        const msg    = sync.body.error  ?? `Sync failed`
+        const detail = sync.body.detail ?? sync.body._raw ?? `HTTP ${sync.status}`
         console.error("[ResetResync] Sync failed:", sync.body)
         setPhase({ type: "error", message: msg, detail })
         return
       }
 
-      const synced = (sync.body.synced as number) ?? 0
-      const parsed = (sync.body.parsed as number) ?? 0
+      const synced = sync.body.synced ?? 0
+      const parsed = sync.body.parsed ?? 0
       console.log(`[ResetResync] Sync OK — parsed=${parsed} synced=${synced}`, sync.body)
 
       setPhase({ type: "done", deleted, synced })

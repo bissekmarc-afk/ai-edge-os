@@ -71,14 +71,32 @@ function parseAmount(raw: string | undefined): number {
 export async function POST(request: NextRequest) {
   console.log("[sync/google-sheets] ── POST started ──")
 
-  // ── Env guards ───────────────────────────────────────────────────────────
+  try {
+    return await handler(request)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack   = err instanceof Error ? err.stack   : undefined
+    console.error("[sync/google-sheets] 💥 Unhandled exception:", message)
+    if (stack) console.error(stack)
+    return NextResponse.json(
+      { error: "Internal server error", detail: message },
+      { status: 500 },
+    )
+  }
+}
+
+async function handler(request: NextRequest): Promise<NextResponse> {
+
+  // ── 1. Env guards ─────────────────────────────────────────────────────────
   const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID
+  console.log(`[sync/google-sheets] STEP 1 env — spreadsheetId=${spreadsheetId ? `${spreadsheetId.slice(0,8)}…` : "MISSING"}`)
   if (!spreadsheetId) {
     return NextResponse.json({ error: "GOOGLE_SHEETS_SPREADSHEET_ID not configured" }, { status: 503 })
   }
 
   const supabaseUrl = process.env.SUPABASE_URL
   const supabaseKey = process.env.SUPABASE_ANON_KEY
+  console.log(`[sync/google-sheets]          supabaseUrl=${supabaseUrl ? "set" : "MISSING"} supabaseKey=${supabaseKey ? "set" : "MISSING"}`)
   if (!supabaseUrl || !supabaseKey) {
     return NextResponse.json(
       { error: "Supabase not configured", detail: "SUPABASE_URL or SUPABASE_ANON_KEY is missing" },
@@ -86,7 +104,8 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // ── Supabase auth ────────────────────────────────────────────────────────
+  // ── 2. Supabase auth ───────────────────────────────────────────────────────
+  console.log("[sync/google-sheets] STEP 2 auth — reading session from cookies…")
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() { return request.cookies.getAll() },
@@ -95,7 +114,10 @@ export async function POST(request: NextRequest) {
   })
 
   const { data: { session }, error: sessionError } = await supabase.auth.getSession()
-  console.log(`[sync/google-sheets] session=${session ? `uid=${session.user.id}` : "null"}`)
+  console.log(
+    `[sync/google-sheets]          session=${session ? `uid=${session.user.id}` : "null"}` +
+    ` sessionError=${sessionError?.message ?? "none"}`,
+  )
 
   if (sessionError || !session) {
     return NextResponse.json(
@@ -106,18 +128,19 @@ export async function POST(request: NextRequest) {
 
   const userId = session.user.id
 
-  // ── Google access token ──────────────────────────────────────────────────
+  // ── 3. Google access token ─────────────────────────────────────────────────
+  console.log("[sync/google-sheets] STEP 3 google token — calling getGoogleAccessToken…")
   let token: string
   try {
     token = await getGoogleAccessToken("https://www.googleapis.com/auth/spreadsheets.readonly")
-    console.log("[sync/google-sheets] Google access token obtained")
+    console.log(`[sync/google-sheets]          token obtained (${token.slice(0, 8)}…)`)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error("[sync/google-sheets] Google auth error:", msg)
+    console.error("[sync/google-sheets]          Google auth error:", msg)
     return NextResponse.json({ error: msg }, { status: 502 })
   }
 
-  // ── Fetch "BUDGET DAF" tab ───────────────────────────────────────────────
+  // ── 4. Fetch "BUDGET DAF" tab ──────────────────────────────────────────────
   //
   // Sheet names with spaces must be wrapped in single quotes in A1 notation.
   // URL-encode the full range string: 'BUDGET DAF' → %27BUDGET%20DAF%27
@@ -125,31 +148,46 @@ export async function POST(request: NextRequest) {
   const range    = encodeURIComponent("'BUDGET DAF'")
   const sheetUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${range}?majorDimension=ROWS`
 
-  console.log("[sync/google-sheets] Fetching tab 'BUDGET DAF'…")
+  console.log(`[sync/google-sheets] STEP 4 sheets — GET ${sheetUrl}`)
   const sheetRes = await fetch(sheetUrl, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  console.log(`[sync/google-sheets] Sheets API status: ${sheetRes.status}`)
+  console.log(`[sync/google-sheets]          Sheets API HTTP status: ${sheetRes.status} ${sheetRes.statusText}`)
 
-  const sheetData = (await sheetRes.json()) as {
-    values?: string[][]
-    error?:  { message: string; code?: number; status?: string }
+  // Read body as text first so we can log it if JSON.parse fails
+  const rawBody = await sheetRes.text()
+  console.log(`[sync/google-sheets]          body length: ${rawBody.length} chars`)
+  if (rawBody.length < 500) {
+    console.log(`[sync/google-sheets]          body preview: ${rawBody}`)
+  } else {
+    console.log(`[sync/google-sheets]          body preview: ${rawBody.slice(0, 300)}…`)
+  }
+
+  let sheetData: { values?: string[][]; error?: { message: string; code?: number; status?: string } }
+  try {
+    sheetData = JSON.parse(rawBody) as typeof sheetData
+  } catch (parseErr) {
+    console.error("[sync/google-sheets]          JSON.parse failed:", parseErr)
+    return NextResponse.json(
+      { error: "Sheets API returned non-JSON response", detail: rawBody.slice(0, 300) },
+      { status: 502 },
+    )
   }
 
   if (sheetData.error) {
-    console.error("[sync/google-sheets] Sheets API error:", sheetData.error)
+    console.error("[sync/google-sheets]          Sheets API error object:", JSON.stringify(sheetData.error))
     return NextResponse.json(
-      { error: `Sheets API: ${sheetData.error.message}`, detail: sheetData.error },
+      { error: `Sheets API: ${sheetData.error.message}`, detail: String(sheetData.error.code ?? sheetData.error.status ?? "") || undefined },
       { status: 502 },
     )
   }
 
   const allRows = sheetData.values ?? []
-  console.log(`[sync/google-sheets] Raw rows: ${allRows.length}`)
+  console.log(`[sync/google-sheets] STEP 5 parse — ${allRows.length} raw rows from sheet`)
 
-  // Log first 3 rows for layout verification
+  // Log first 3 rows for column layout verification
   allRows.slice(0, 3).forEach((row, i) =>
-    console.log(`[sync/google-sheets] raw[${i}] (${row.length} cols):`, JSON.stringify(row)),
+    console.log(`[sync/google-sheets]          raw[${i}] (${row.length} cols): ${JSON.stringify(row)}`),
   )
 
   // Row 0 is the header — skip it
@@ -281,7 +319,8 @@ export async function POST(request: NextRequest) {
 
     if (error) {
       console.error("[sync/google-sheets] Upsert error:", error.message, error)
-      return NextResponse.json({ error: error.message, detail: error }, { status: 500 })
+      const detail = [error.details, error.hint, error.code].filter(Boolean).join(" — ") || undefined
+      return NextResponse.json({ error: error.message, detail }, { status: 500 })
     }
 
     totalSynced += count as number

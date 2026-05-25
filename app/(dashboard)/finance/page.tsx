@@ -6,8 +6,10 @@ import { FinanceKpiCards }   from "@/components/finance/finance-kpi-cards"
 import { FinanceAlerts }     from "@/components/finance/finance-alerts"
 import { PLCashflowChart }   from "@/components/finance/cashflow-chart"
 import { Skeleton }          from "@/components/ui/skeleton"
-import { getLastDataMonth, getMonthRows, getYearRows } from "@/lib/finance/queries"
-import { computePL, computeYearSummaries, monthName } from "@/lib/finance/aggregations"
+import { getLastDataMonth, getMonthRows, getYearRows, getNonCashRows } from "@/lib/finance/queries"
+import { computePL, computeYearSummaries, computeBalanceSheet, monthName } from "@/lib/finance/aggregations"
+import { getLatestWealthSnapshots } from "@/lib/queries/finance-dashboard"
+import { BalanceSheetSection } from "@/components/finance/balance-sheet-section"
 
 // ─── Fallback skeleton ────────────────────────────────────────────────────────
 
@@ -44,14 +46,25 @@ async function FinanceDashboard() {
 
   const { month, year } = lastMonth
 
-  // Fetch in parallel: current-month rows + full-year rows for the chart
-  const [monthRows, yearRows] = await Promise.all([
+  // Previous month for balance sheet delta
+  const prevM = month === 1 ? 12 : month - 1
+  const prevY = month === 1 ? year - 1 : year
+
+  // Fetch everything in parallel
+  const [monthRows, yearRows, wealthAssets, nonCashRows, prevNonCashRows] = await Promise.all([
     getMonthRows(month, year),
     getYearRows(year),
+    getLatestWealthSnapshots(),
+    getNonCashRows(month, year),
+    getNonCashRows(prevM, prevY),
   ])
 
-  const pl              = computePL(monthRows, month, year)
+  const pl              = computePL(monthRows)
   const yearlySummaries = computeYearSummaries(yearRows, year)
+  const balanceSheet    = computeBalanceSheet(nonCashRows, month, year, prevNonCashRows)
+  const wealthTotal     = wealthAssets.length > 0
+    ? wealthAssets.reduce((s, a) => s + Number(a.amount), 0)
+    : undefined
 
   return (
     <div className="flex flex-col gap-6">
@@ -69,7 +82,7 @@ async function FinanceDashboard() {
       <FinanceAlerts pl={pl} />
 
       {/* ── KPI row ───────────────────────────────────────────────────── */}
-      <FinanceKpiCards pl={pl} />
+      <FinanceKpiCards pl={pl} wealthTotal={wealthTotal} />
 
       {/* ── P&L + Chart ───────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
@@ -91,6 +104,12 @@ async function FinanceDashboard() {
           <PLCashflowChart data={yearlySummaries} />
         </div>
       </div>
+
+      {/* ── Bilan patrimonial ─────────────────────────────────────────── */}
+      <BalanceSheetSection
+        bs={balanceSheet}
+        recurringNetIncome={pl.recurringIncome - pl.taxes}
+      />
     </div>
   )
 }

@@ -1,54 +1,45 @@
-// ─── Section keys ─────────────────────────────────────────────────────────────
+// ─── Re-exports from aggregations (convenience for consumers) ────────────────
+export type {
+  EntryType,
+  FluxNature,
+  EntrySubtype,
+  FinanceEntry,
+  PLBucket,
+  ClassifiedEntry,
+  PLResult,
+} from "./aggregations"
 
-export type SectionKey =
-  | "gross_income"
-  | "taxes"
-  | "fixed_costs"
-  | "variable_costs"
-  | "one_off"
-  | "debt_service"
-  | "capex"
+// ─── Raw row from finance_entries (non-cash / balance sheet entries) ──────────
 
-// ─── Raw row from finance_entries ─────────────────────────────────────────────
-
-export interface FinanceRow {
-  category: string
-  label:    string
-  amount:   number
-  entry_type: "income" | "expense"
-  month:    number
-  year:     number
+export interface NonCashRow {
+  label:  string
+  amount: number
+  month:  number
+  year:   number
 }
 
-// ─── Computed P&L for one month ───────────────────────────────────────────────
+// ─── Balance sheet ────────────────────────────────────────────────────────────
 
-export interface PLMonth {
-  month:    number
-  year:     number
+export interface BalanceSheet {
+  month: number
+  year:  number
 
-  // Income
-  grossIncome:  number   // Σ income cash
-  taxes:        number   // Σ Tax category
-  netIncome:    number   // grossIncome − taxes
+  assets: {
+    immo:     number
+    equities: number
+    art:      number
+    savings:  number
+    total:    number
+  }
 
-  // Expenses
-  fixedCosts:    number   // Σ fixed_costs
-  variableCosts: number   // Σ variable_costs
-  oneOff:        number   // Σ one_off
-  debtService:   number   // Σ debt_service
+  liabilities: {
+    credits: Array<{ label: string; amount: number }>
+    total:   number
+  }
 
-  // Subtotals
-  ebitda:       number   // netIncome − fixedCosts − variableCosts − oneOff − debtService
-  capex:        number   // Σ capex
-  netCashFlow:  number   // ebitda − capex
-
-  // Ratios
-  ebitdaRate:         number   // ebitda / grossIncome
-  debtServiceRatio:   number   // debtService / netIncome
-  savingsRate:        number   // (capex + netCashFlow) / netIncome
-
-  // Diagnostics
-  unmappedCategories: string[]
+  netWorth:       number
+  prevNetWorth?:  number
+  netWorthDelta?: number
 }
 
 // ─── One-row summary per month for the annual chart ───────────────────────────
@@ -58,7 +49,7 @@ export interface MonthlySummary {
   year:        number
   monthLabel:  string
   grossIncome: number
-  opex:        number   // fixedCosts + variableCosts + oneOff
+  opex:        number
   debtService: number
   netCashFlow: number
 }

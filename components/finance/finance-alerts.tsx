@@ -1,6 +1,6 @@
 import { XCircle, AlertTriangle, Info } from "lucide-react"
 import { cn } from "@/lib/utils"
-import type { PLMonth } from "@/lib/finance/types"
+import type { PLResult } from "@/lib/finance/aggregations"
 
 // ─── Alert model ──────────────────────────────────────────────────────────────
 
@@ -15,7 +15,7 @@ const EUR = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 0,
 })
 
-export function buildAlerts(pl: PLMonth): Alert[] {
+export function buildAlerts(pl: PLResult): Alert[] {
   const alerts: Alert[] = []
 
   if (pl.ebitda < 0) {
@@ -32,18 +32,20 @@ export function buildAlerts(pl: PLMonth): Alert[] {
     })
   }
 
-  if (pl.debtServiceRatio > 0.25) {
+  const dsRatio = pl.debtServiceRatio ?? 0
+  if (dsRatio > 0.25) {
     alerts.push({
       level: "warning",
-      message: `Debt Service élevé : ${(pl.debtServiceRatio * 100).toFixed(1)}% des revenus nets (seuil : 25 %)`,
+      message: `Debt Service élevé : ${(dsRatio * 100).toFixed(1)}% des revenus nets (seuil : 25 %)`,
     })
   }
 
-  if (pl.unmappedCategories.length > 0) {
-    const n = pl.unmappedCategories.length
+  if (pl.unmappedEntries.length > 0) {
+    const cats = [...new Set(pl.unmappedEntries.map(e => e.entry.category ?? "?"))].sort()
+    const n    = cats.length
     alerts.push({
       level: "info",
-      message: `${n} catégorie${n > 1 ? "s" : ""} non mappée${n > 1 ? "s" : ""} : ${pl.unmappedCategories.join(", ")}`,
+      message: `${pl.unmappedEntries.length} ligne${pl.unmappedEntries.length > 1 ? "s" : ""} non mappée${pl.unmappedEntries.length > 1 ? "s" : ""} (${n} cat.) : ${cats.join(", ")}`,
     })
   }
 
@@ -53,7 +55,7 @@ export function buildAlerts(pl: PLMonth): Alert[] {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 interface FinanceAlertsProps {
-  pl: PLMonth
+  pl: PLResult
 }
 
 export function FinanceAlerts({ pl }: FinanceAlertsProps) {

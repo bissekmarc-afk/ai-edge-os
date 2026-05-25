@@ -1,6 +1,9 @@
-import { TrendingUp, Wallet, CreditCard, PiggyBank } from "lucide-react"
+import { TrendingUp, Wallet, CreditCard, PiggyBank, Landmark } from "lucide-react"
+import { cn } from "@/lib/utils"
 import { KpiCard } from "@/components/dashboard/kpi-card"
-import type { PLMonth } from "@/lib/finance/types"
+import type { PLResult } from "@/lib/finance/aggregations"
+
+// ─── Formatters ───────────────────────────────────────────────────────────────
 
 const EUR = new Intl.NumberFormat("fr-FR", {
   style: "currency",
@@ -8,54 +11,130 @@ const EUR = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 0,
 })
 
-function fmtEur(n: number): string { return EUR.format(n) }
-function fmtPct(n: number): string { return `${(n * 100).toFixed(1)}%` }
+function fmtEur(n: number): string       { return EUR.format(n) }
+function fmtPct(n: number): string       { return `${n.toFixed(1)}%` }  // n already in %
 
-interface FinanceKpiCardsProps {
-  pl: PLMonth
+// ─── Status helpers ───────────────────────────────────────────────────────────
+//
+//   KPI           measure                target    direction
+//   ─────────────────────────────────────────────────────────
+//   EBITDA        ebitda / grossIncome   > 10%     surplus
+//   Debt Service  debtService / netIncome < 25%    expense
+//   Savings rate  (capex+ncf) / netIncome > 15%   surplus
+//   NCF           € absolute             ≥ 0       surplus (0 = min)
+
+type Status = "ok" | "warn" | "danger"
+
+/** Lower is better — warn > max × 0.8, danger > max */
+function expStatus(val: number, max: number): Status {
+  if (val > max)          return "danger"
+  if (val > max * 0.8)    return "warn"
+  return "ok"
 }
 
-export function FinanceKpiCards({ pl }: FinanceKpiCardsProps) {
+/** Higher is better — warn < min, danger < min × 0.8 */
+function surpStatus(val: number, min: number): Status {
+  if (val < min * 0.8)    return "danger"
+  if (val < min)          return "warn"
+  return "ok"
+}
+
+const COLOR: Record<Status, string> = {
+  ok:     "var(--success)",
+  warn:   "var(--warning)",
+  danger: "var(--danger)",
+}
+
+const TREND: Record<Status, "up" | "down" | "neutral"> = {
+  ok:     "up",
+  warn:   "neutral",
+  danger: "down",
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
+interface FinanceKpiCardsProps {
+  pl:           PLResult
+  wealthTotal?: number
+}
+
+export function FinanceKpiCards({ pl, wealthTotal }: FinanceKpiCardsProps) {
+
+  // ── EBITDA% — target > 10% of gross income ────────────────────────────
+  const ebitdaPct    = (pl.ebitdaRate ?? 0) * 100
+  const ebitdaSt     = surpStatus(ebitdaPct, 10)
+
+  // ── Debt Service — target < 25% of net income ─────────────────────────
+  const dsPct        = (pl.debtServiceRatio ?? 0) * 100
+  const dsSt         = expStatus(dsPct, 25)
+
+  // ── Savings rate — target > 15% of net income ─────────────────────────
+  const savPct       = (pl.savingsRate ?? 0) * 100
+  const savSt        = surpStatus(savPct, 15)
+
+  // ── Recurring net income (base for KPI sub-labels) ────────────────────
+  const recurringNetIncome = pl.recurringIncome - pl.taxes
+
+  // ── Net Cash Flow — positive = ok ─────────────────────────────────────
+  const ncfSt: Status = pl.netCashFlow >= 0 ? "ok" : "danger"
+
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      {/* EBITDA */}
+    <div
+      className={cn(
+        "grid grid-cols-2 gap-4",
+        wealthTotal !== undefined ? "lg:grid-cols-5" : "lg:grid-cols-4",
+      )}
+    >
+      {/* ── EBITDA% ───────────────────────────────────────────────────── */}
       <KpiCard
         title="EBITDA"
-        value={fmtEur(pl.ebitda)}
-        sub={`${fmtPct(pl.ebitdaRate)} des revenus bruts`}
+        value={fmtPct(ebitdaPct)}
+        sub={`cible > 10% · base rée. ${fmtEur(recurringNetIncome)} · ${fmtEur(pl.ebitda)}`}
         icon={<TrendingUp className="size-4" />}
-        trend={pl.ebitda >= 0 ? "up" : "down"}
-        accentColor={pl.ebitda >= 0 ? "var(--success)" : "var(--danger)"}
+        trend={TREND[ebitdaSt]}
+        accentColor={COLOR[ebitdaSt]}
       />
 
-      {/* NET CASH FLOW */}
+      {/* ── CASH DISPONIBLE (NCF €) ───────────────────────────────────── */}
       <KpiCard
-        title="Net Cash Flow"
+        title="Cash disponible"
         value={fmtEur(pl.netCashFlow)}
-        sub={pl.netCashFlow >= 0 ? "Positif ✓" : "Négatif ✗"}
+        sub={pl.netCashFlow >= 0 ? "Net Cash Flow positif ✓" : "Net Cash Flow négatif ✗"}
         icon={<Wallet className="size-4" />}
-        trend={pl.netCashFlow >= 0 ? "up" : "down"}
-        accentColor={pl.netCashFlow >= 0 ? "var(--success)" : "var(--danger)"}
+        trend={TREND[ncfSt]}
+        accentColor={COLOR[ncfSt]}
       />
 
-      {/* DEBT SERVICE RATIO */}
+      {/* ── DEBT SERVICE RATIO ────────────────────────────────────────── */}
       <KpiCard
         title="Debt Service"
-        value={fmtPct(pl.debtServiceRatio)}
-        sub={`${fmtEur(pl.debtService)} / mois`}
+        value={fmtPct(dsPct)}
+        sub={`cible < 25% · base rée. ${fmtEur(recurringNetIncome)} · ${fmtEur(pl.debtService)} / mois`}
         icon={<CreditCard className="size-4" />}
-        trend={pl.debtServiceRatio > 0.25 ? "down" : "neutral"}
-        accentColor={pl.debtServiceRatio > 0.25 ? "var(--warning)" : undefined}
+        trend={TREND[dsSt]}
+        accentColor={COLOR[dsSt]}
       />
 
-      {/* SAVINGS RATE */}
+      {/* ── TAUX D'ÉPARGNE ────────────────────────────────────────────── */}
       <KpiCard
         title="Taux d'épargne"
-        value={fmtPct(pl.savingsRate)}
-        sub="(CAPEX + NCF) / Revenus nets"
+        value={fmtPct(savPct)}
+        sub="cible > 15% · (CAPEX + NCF) / rev. nets récurrents"
         icon={<PiggyBank className="size-4" />}
-        trend={pl.savingsRate >= 0.2 ? "up" : pl.savingsRate < 0.1 ? "down" : "neutral"}
+        trend={TREND[savSt]}
+        accentColor={COLOR[savSt]}
       />
+
+      {/* ── PATRIMOINE TOTAL ──────────────────────────────────────────── */}
+      {wealthTotal !== undefined && (
+        <KpiCard
+          title="Patrimoine"
+          value={fmtEur(wealthTotal)}
+          sub="Snapshot le plus récent"
+          icon={<Landmark className="size-4" />}
+          trend="neutral"
+        />
+      )}
     </div>
   )
 }
