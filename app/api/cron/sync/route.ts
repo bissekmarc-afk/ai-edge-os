@@ -126,7 +126,7 @@ export async function POST(request: Request) {
   // 5. Créer sync_run avec status = 'running'
   const { data: syncRun, error: runError } = await supabase
     .from("sync_runs")
-    .insert({ user_id: userId, status: "running", started_at: new Date().toISOString() })
+    .insert({ user_id: userId, status: "running", source: "cron", started_at: new Date().toISOString() })
     .select("id")
     .single()
 
