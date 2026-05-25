@@ -895,6 +895,8 @@ interface BudgetSummary {
   balance: number
   currency: string
   entriesCount: number
+  month: number
+  year: number
 }
 
 export function getMonthlyBudgetSummary(): BudgetSummary {
@@ -904,12 +906,15 @@ export function getMonthlyBudgetSummary(): BudgetSummary {
   const expenses = mockFinanceEntries
     .filter((e) => e.entryType === "expense")
     .reduce((sum, e) => sum + Math.abs(e.amount), 0)
+  const now = new Date()
   return {
     income,
     expenses,
     balance: income - expenses,
     currency: "EUR",
     entriesCount: mockFinanceEntries.length,
+    month: now.getMonth() + 1,
+    year:  now.getFullYear(),
   }
 }
 

@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server"
+import { getLastDataMonth } from "@/lib/finance/queries"
 
 export interface BudgetSummary {
   income: number
@@ -6,22 +7,27 @@ export interface BudgetSummary {
   balance: number
   currency: string
   entriesCount: number
+  month: number
+  year: number
 }
 
-export async function getBudgetSummaryFromSupabase(month?: string): Promise<BudgetSummary | null> {
+export async function getBudgetSummaryFromSupabase(): Promise<BudgetSummary | null> {
   const supabase = await createSupabaseServerClient()
   if (!supabase) return null
 
-  // Default to current month
-  const target = month ?? new Date().toISOString().slice(0, 7) // "YYYY-MM"
-  const from = `${target}-01`
-  const to   = `${target}-31`
+  // Dernier mois ayant des données réelles (cash uniquement, même logique que getLastDataMonth)
+  const lastMonth = await getLastDataMonth()
+  if (!lastMonth) return null
+
+  const { month, year } = lastMonth
 
   const { data, error } = await supabase
     .from("finance_entries")
     .select("amount, entry_type")
-    .gte("date", from)
-    .lte("date", to)
+    .eq("month",       month)
+    .eq("year",        year)
+    .eq("is_non_cash", false)
+    .eq("is_subtotal", false)
 
   if (error || !data || data.length === 0) return null
 
@@ -34,5 +40,7 @@ export async function getBudgetSummaryFromSupabase(month?: string): Promise<Budg
     balance: income - expenses,
     currency: "EUR",
     entriesCount: data.length,
+    month,
+    year,
   }
 }

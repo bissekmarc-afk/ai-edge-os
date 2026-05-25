@@ -5,6 +5,11 @@ import { getConfirmedMemories } from "@/lib/queries/memory"
 
 const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
 
+const MONTHS_FR = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+]
+
 function sortTasks<T extends { priority: string; dueDate: string }>(tasks: T[]): T[] {
   return [...tasks].sort((a, b) => {
     if (!a.dueDate && !b.dueDate) return (PRIORITY_RANK[a.priority] ?? 4) - (PRIORITY_RANK[b.priority] ?? 4)
@@ -38,8 +43,11 @@ function buildSystemPrompt(
           })
           .join("\n")
 
+  const budgetLabel = budget
+    ? `${MONTHS_FR[budget.month - 1]} ${budget.year}`
+    : null
   const budgetText = budget
-    ? `Revenus : ${budget.income} ${budget.currency} · Dépenses : ${budget.expenses} ${budget.currency} · Solde : ${budget.balance} ${budget.currency} (${budget.entriesCount} entrées)`
+    ? `${budgetLabel} — Revenus : ${budget.income} ${budget.currency} · Dépenses : ${budget.expenses} ${budget.currency} · Solde : ${budget.balance} ${budget.currency} (${budget.entriesCount} entrées cash)`
     : "Données budget non disponibles."
 
   const memoriesText =
@@ -57,7 +65,7 @@ ${memoriesText}
 ## Contexte — Top 5 tâches prioritaires
 ${tasksText}
 
-## Contexte — Budget du mois en cours
+## Contexte — Budget${budgetLabel ? ` (${budgetLabel})` : ""}
 ${budgetText}
 
 Réponds en français, de façon concise et directe. Utilise les données ci-dessus pour donner des réponses personnalisées et pertinentes. Si la question ne concerne pas ces données, réponds normalement.`
