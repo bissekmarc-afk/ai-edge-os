@@ -3,17 +3,21 @@
 import { useActionState, useEffect, useRef } from "react"
 import { useFormStatus } from "react-dom"
 import { createFinanceEntry, type ActionResult } from "@/app/actions/create-finance-entry"
-import { SAISIE_CATEGORIES, SAISIE_SUBTYPES } from "@/lib/finance/saisie-schema"
+import { SAISIE_CATEGORIES, SAISIE_SUBTYPES, CATEGORY_DISPLAY } from "@/lib/finance/saisie-schema"
 import { Button } from "@/components/ui/button"
 import { Input }  from "@/components/ui/input"
 import { cn }     from "@/lib/utils"
 
-// ─── Submit button (reads pending state from form context) ────────────────────
+// ─── Submit button ────────────────────────────────────────────────────────────
 
 function SubmitButton() {
   const { pending } = useFormStatus()
   return (
-    <Button type="submit" disabled={pending} className="w-full">
+    <Button
+      type="submit"
+      disabled={pending}
+      className="h-12 w-full text-base font-semibold"
+    >
       {pending ? "Enregistrement…" : "Enregistrer l'entrée"}
     </Button>
   )
@@ -31,16 +35,21 @@ function FieldError({
   const msgs = errors?.[name]
   if (!msgs?.length) return null
   return (
-    <p className="mt-1 text-xs text-destructive" role="alert">
+    <p className="mt-1.5 text-xs text-destructive" role="alert">
       {msgs[0]}
     </p>
   )
 }
 
-// ─── Select styling (consistent with Input) ───────────────────────────────────
+// ─── Shared select className ──────────────────────────────────────────────────
+// h-12 for touch targets, text-base for readability on mobile
 
 const selectCn =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive dark:bg-input/30"
+  "h-12 w-full rounded-lg border border-input bg-transparent px-3 py-2 text-base text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive dark:bg-input/30"
+
+// ─── Shared label className ───────────────────────────────────────────────────
+
+const labelCn = "mb-2 block text-sm font-medium text-foreground"
 
 // ─── Form ─────────────────────────────────────────────────────────────────────
 
@@ -51,7 +60,6 @@ export function FinanceEntryForm() {
   )
   const formRef = useRef<HTMLFormElement>(null)
 
-  // Reset form on success
   useEffect(() => {
     if (state?.status === "success") {
       formRef.current?.reset()
@@ -68,7 +76,7 @@ export function FinanceEntryForm() {
         <div
           role="status"
           className={cn(
-            "rounded-lg border px-4 py-3 text-sm",
+            "rounded-lg border px-4 py-3 text-sm leading-relaxed",
             state.syncStatus === "synced"
               ? "border-green-200 bg-green-50 text-green-800 dark:border-green-800/50 dark:bg-green-950/40 dark:text-green-300"
               : "border-yellow-200 bg-yellow-50 text-yellow-800 dark:border-yellow-800/50 dark:bg-yellow-950/40 dark:text-yellow-300",
@@ -90,10 +98,7 @@ export function FinanceEntryForm() {
 
       {/* ── Date ──────────────────────────────────────────────────────── */}
       <div>
-        <label
-          htmlFor="saisie-date"
-          className="mb-1.5 block text-sm font-medium text-foreground"
-        >
+        <label htmlFor="saisie-date" className={labelCn}>
           Date
         </label>
         <Input
@@ -101,6 +106,7 @@ export function FinanceEntryForm() {
           name="date"
           type="date"
           defaultValue={new Date().toISOString().slice(0, 10)}
+          className="h-12 text-base"
           aria-invalid={!!fieldErrors?.date}
           required
         />
@@ -109,10 +115,7 @@ export function FinanceEntryForm() {
 
       {/* ── Libellé ───────────────────────────────────────────────────── */}
       <div>
-        <label
-          htmlFor="saisie-label"
-          className="mb-1.5 block text-sm font-medium text-foreground"
-        >
+        <label htmlFor="saisie-label" className={labelCn}>
           Libellé
         </label>
         <Input
@@ -120,6 +123,7 @@ export function FinanceEntryForm() {
           name="label"
           type="text"
           placeholder="Ex : Loyer mai 2026"
+          className="h-12 text-base"
           aria-invalid={!!fieldErrors?.label}
           required
         />
@@ -128,13 +132,13 @@ export function FinanceEntryForm() {
 
       {/* ── Flux (Cash In / Cash Out) ──────────────────────────────────── */}
       <fieldset>
-        <legend className="mb-1.5 text-sm font-medium text-foreground">Flux</legend>
-        <div className="flex gap-3">
+        <legend className={labelCn}>Flux</legend>
+        <div className="grid grid-cols-2 gap-3">
           {(["Cash In", "Cash Out"] as const).map((flux) => (
             <label
               key={flux}
               className={cn(
-                "flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
+                "flex cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-4 text-base font-medium transition-colors",
                 "border-input bg-background hover:bg-muted",
                 "has-[:checked]:border-[var(--ai-accent)] has-[:checked]:bg-[var(--ai-accent-soft)] has-[:checked]:text-[var(--ai-accent)]",
               )}
@@ -146,7 +150,7 @@ export function FinanceEntryForm() {
                 defaultChecked={flux === "Cash Out"}
                 className="sr-only"
               />
-              <span>{flux === "Cash In" ? "💰 Cash In" : "💸 Cash Out"}</span>
+              {flux === "Cash In" ? "💰 Cash In" : "💸 Cash Out"}
             </label>
           ))}
         </div>
@@ -155,11 +159,9 @@ export function FinanceEntryForm() {
 
       {/* ── Montant ───────────────────────────────────────────────────── */}
       <div>
-        <label
-          htmlFor="saisie-amount"
-          className="mb-1.5 block text-sm font-medium text-foreground"
-        >
-          Montant <span className="text-muted-foreground">(€, toujours positif)</span>
+        <label htmlFor="saisie-amount" className={labelCn}>
+          Montant{" "}
+          <span className="font-normal text-muted-foreground">(€, toujours positif)</span>
         </label>
         <Input
           id="saisie-amount"
@@ -168,6 +170,7 @@ export function FinanceEntryForm() {
           min="0.01"
           step="0.01"
           placeholder="0.00"
+          className="h-12 text-base"
           aria-invalid={!!fieldErrors?.amount}
           required
         />
@@ -176,10 +179,7 @@ export function FinanceEntryForm() {
 
       {/* ── Catégorie ─────────────────────────────────────────────────── */}
       <div>
-        <label
-          htmlFor="saisie-category"
-          className="mb-1.5 block text-sm font-medium text-foreground"
-        >
+        <label htmlFor="saisie-category" className={labelCn}>
           Catégorie
         </label>
         <select
@@ -195,7 +195,7 @@ export function FinanceEntryForm() {
           </option>
           {SAISIE_CATEGORIES.map((c) => (
             <option key={c} value={c}>
-              {c}
+              {CATEGORY_DISPLAY[c]}
             </option>
           ))}
         </select>
@@ -204,10 +204,7 @@ export function FinanceEntryForm() {
 
       {/* ── Sous-type (optionnel) ──────────────────────────────────────── */}
       <div>
-        <label
-          htmlFor="saisie-subtype"
-          className="mb-1.5 block text-sm font-medium text-foreground"
-        >
+        <label htmlFor="saisie-subtype" className={labelCn}>
           Sous-type{" "}
           <span className="font-normal text-muted-foreground">(optionnel)</span>
         </label>
@@ -227,7 +224,9 @@ export function FinanceEntryForm() {
       </div>
 
       {/* ── Submit ────────────────────────────────────────────────────── */}
-      <SubmitButton />
+      <div className="pt-1">
+        <SubmitButton />
+      </div>
     </form>
   )
 }

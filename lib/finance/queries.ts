@@ -65,6 +65,7 @@ export async function getMonthRows(month: number, year: number): Promise<Finance
     .eq("year",        year)
     .eq("is_subtotal", false)
     .eq("is_non_cash", false)
+    .neq("sync_status", "deleted")
 
   if (error || !data) return []
   return data as FinanceEntry[]

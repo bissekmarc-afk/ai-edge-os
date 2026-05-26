@@ -24,6 +24,27 @@ export const SAISIE_CATEGORIES = [
 
 export type SaisieCategory = (typeof SAISIE_CATEGORIES)[number]
 
+// Labels affichés dans le formulaire (valeurs DB inchangées)
+export const CATEGORY_DISPLAY: Record<SaisieCategory, string> = {
+  "Income":          "💰 Revenus",
+  "Tax":             "🏛️ Impôts & Taxes",
+  "Housing":         "🏠 Logement",
+  "Transport":       "🚗 Transport",
+  "Food":            "🛒 Alimentation",
+  "Health":          "💊 Santé",
+  "Leisure":         "🎭 Loisirs",
+  "Personal":        "👤 Personnel",
+  "Gifts":           "🎁 Cadeaux",
+  "Debt Repayments": "🏦 Remboursement Crédit",
+  "Investment":      "📈 Investissement",
+  "Tontine":         "🤝 Tontine",
+  "Savings":         "💵 Épargne",
+  "Big & one-offs":  "⚡ Dépense Exceptionnelle",
+  "Art":             "🎨 Art & Collectibles",
+  "Legal":           "⚖️ Frais Juridiques",
+  "Odd":             "📦 Divers",
+}
+
 export const SAISIE_SUBTYPES = ["Fixed", "Variable", "One-off"] as const
 export type SaisieSubtype = (typeof SAISIE_SUBTYPES)[number]
 
