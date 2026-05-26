@@ -268,6 +268,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         month,
         year,
         scenario:      "budget",
+        sync_status:   "synced",
         synced_at:     now,
       })
       rowEntries++

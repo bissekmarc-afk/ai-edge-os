@@ -57,34 +57,34 @@ export async function createFinanceEntry(
   const entryType    = flux_nature === "Cash In" ? "income" : "expense"
   const signedAmount = flux_nature === "Cash Out" ? -Math.abs(amount) : Math.abs(amount)
 
-  // ── 4. Upsert Supabase ─────────────────────────────────────────────────────
+  // ── 4. Upsert Supabase via RPC (bypasses PostgREST schema cache) ────────────
   const { error: supabaseError } = await supabase
-    .from("finance_entries")
-    .upsert(
-      {
-        user_id:       user.id,
-        source:        "manual_saisie",
-        external_id:   externalId,
-        date,
-        label,
-        category,
-        amount:        signedAmount,
-        currency:      "EUR",
-        entry_type:    entryType,
-        entry_subtype: entry_subtype ?? null,
-        flux_nature,
-        is_non_cash:   false,
-        is_subtotal:   false,
-        is_recurring:  false,
-        month,
-        year,
-        scenario:      "budget",
-        validated:     true,
-        sync_status:   "pending",
-        synced_at:     now,
-      },
-      { onConflict: "user_id,source,external_id" },
-    )
+    .rpc("upsert_finance_entries_batch", {
+      p_entries: [
+        {
+          user_id:       user.id,
+          source:        "manual_saisie",
+          external_id:   externalId,
+          date,
+          label,
+          category,
+          amount:        signedAmount,
+          currency:      "EUR",
+          entry_type:    entryType,
+          entry_subtype: entry_subtype ?? null,
+          flux_nature,
+          is_non_cash:   false,
+          is_subtotal:   false,
+          is_recurring:  false,
+          month,
+          year,
+          scenario:      "budget",
+          validated:     true,
+          sync_status:   "pending",
+          synced_at:     now,
+        },
+      ],
+    })
 
   if (supabaseError) {
     return { status: "fatal", message: `Erreur Supabase : ${supabaseError.message}` }
@@ -115,12 +115,13 @@ export async function createFinanceEntry(
     syncStatus = "sheet_failed"
   }
 
-  // ── 6. Update sync_status ──────────────────────────────────────────────────
+  // ── 6. Update sync_status via RPC (bypasses PostgREST schema cache) ─────────
   await supabase
-    .from("finance_entries")
-    .update({ sync_status: syncStatus })
-    .eq("external_id", externalId)
-    .eq("user_id",     user.id)
+    .rpc("update_finance_entry_sync_status", {
+      p_user_id:     user.id,
+      p_external_id: externalId,
+      p_sync_status: syncStatus,
+    })
 
   return {
     status:     "success",
