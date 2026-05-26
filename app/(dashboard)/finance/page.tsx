@@ -1,6 +1,9 @@
-import { Suspense } from "react"
+import { Suspense }   from "react"
+import Link            from "next/link"
+import { Plus }        from "lucide-react"
 import { SectionHeading }    from "@/components/shared/section-heading"
 import { ResetResyncButton } from "@/components/finance/reset-resync-button"
+import { buttonVariants }    from "@/components/ui/button"
 import { PLStatementCard }   from "@/components/finance/pl-statement-card"
 import { FinanceKpiCards }   from "@/components/finance/finance-kpi-cards"
 import { FinanceAlerts }     from "@/components/finance/finance-alerts"
@@ -122,7 +125,15 @@ export default function FinancePage() {
       <SectionHeading
         title="Finance"
         description="P&L · Family Office — DAF"
-        action={<ResetResyncButton />}
+        action={
+          <div className="flex items-center gap-2">
+            <Link href="/saisie" className={buttonVariants({ size: "sm" })}>
+              <Plus className="size-3.5" />
+              Saisir
+            </Link>
+            <ResetResyncButton />
+          </div>
+        }
       />
       <Suspense fallback={<DashboardSkeleton />}>
         <FinanceDashboard />
