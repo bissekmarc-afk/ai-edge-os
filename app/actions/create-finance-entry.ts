@@ -78,7 +78,7 @@ export async function createFinanceEntry(
           is_recurring:  false,
           month,
           year,
-          scenario:      "budget",
+          scenario:      "actual",
           validated:     true,
           sync_status:   "pending",
           synced_at:     now,
