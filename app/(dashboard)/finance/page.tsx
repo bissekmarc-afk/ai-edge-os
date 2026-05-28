@@ -9,10 +9,36 @@ import { FinanceKpiCards }   from "@/components/finance/finance-kpi-cards"
 import { FinanceAlerts }     from "@/components/finance/finance-alerts"
 import { PLCashflowChart }   from "@/components/finance/cashflow-chart"
 import { Skeleton }          from "@/components/ui/skeleton"
+import { ScenarioToggle }    from "@/components/finance/ScenarioToggle"
+import { VarianceTable }     from "@/components/finance/VarianceTable"
+import { FYForecastCard }    from "@/components/finance/FYForecastCard"
 import { getLastDataMonth, getMonthRows, getYearRows, getNonCashRows } from "@/lib/finance/queries"
 import { computePL, computeYearSummaries, computeBalanceSheet, monthName } from "@/lib/finance/aggregations"
 import { getLatestWealthSnapshots } from "@/lib/queries/finance-dashboard"
 import { BalanceSheetSection } from "@/components/finance/balance-sheet-section"
+import type { ScenarioValue } from "@/components/finance/ScenarioToggle"
+
+// ─── searchParams type (Next.js 15/16 — Promise-based) ───────────────────────
+
+type FinancePageSearchParams = Promise<{
+  scenario?: string
+}>
+
+// ─── Scenario parsing ─────────────────────────────────────────────────────────
+
+const VALID_SCENARIOS: ScenarioValue[] = [
+  "actual",
+  "budget_initial",
+  "reforecast_6m",
+  "variance",
+]
+
+function parseScenario(raw: string | undefined): ScenarioValue {
+  if (raw && (VALID_SCENARIOS as string[]).includes(raw)) {
+    return raw as ScenarioValue
+  }
+  return "actual"
+}
 
 // ─── Fallback skeleton ────────────────────────────────────────────────────────
 
@@ -35,7 +61,7 @@ function DashboardSkeleton() {
 
 // ─── Data-fetching inner component ───────────────────────────────────────────
 
-async function FinanceDashboard() {
+async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
   const lastMonth = await getLastDataMonth()
 
   // No data yet — show empty state
@@ -48,6 +74,11 @@ async function FinanceDashboard() {
   }
 
   const { month, year } = lastMonth
+
+  // Current wall-clock month for variance / forecast logic
+  const now          = new Date()
+  const currentMonth = now.getMonth() + 1
+  const currentYear  = now.getFullYear()
 
   // Previous month for balance sheet delta
   const prevM = month === 1 ? 12 : month - 1
@@ -80,6 +111,23 @@ async function FinanceDashboard() {
           {monthName(month, year)}
         </span>
       </div>
+
+      {/* ── FY Forecast — visible for all scenarios ────────────────────── */}
+      <FYForecastCard
+        year={year}
+        currentMonth={currentMonth}
+        currentYear={currentYear}
+      />
+
+      {/* ── Variance Table — only when scenario === 'variance' ─────────── */}
+      {scenario === "variance" && (
+        <VarianceTable
+          month={month}
+          year={year}
+          currentMonth={currentMonth}
+          currentYear={currentYear}
+        />
+      )}
 
       {/* ── Alerts ────────────────────────────────────────────────────── */}
       <FinanceAlerts pl={pl} />
@@ -119,7 +167,13 @@ async function FinanceDashboard() {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function FinancePage() {
+export default async function FinancePage(props: {
+  searchParams: FinancePageSearchParams
+}) {
+  // searchParams is a Promise in Next.js 15/16 — must be awaited
+  const sp       = await props.searchParams
+  const scenario = parseScenario(sp?.scenario)
+
   return (
     <div className="flex flex-col gap-6">
       <SectionHeading
@@ -135,8 +189,14 @@ export default function FinancePage() {
           </div>
         }
       />
+
+      {/* ── Scenario Toggle — wrapped in Suspense per Next.js docs ──────── */}
+      <Suspense fallback={<Skeleton className="h-10 w-80 rounded-lg" />}>
+        <ScenarioToggle active={scenario} />
+      </Suspense>
+
       <Suspense fallback={<DashboardSkeleton />}>
-        <FinanceDashboard />
+        <FinanceDashboard scenario={scenario} />
       </Suspense>
     </div>
   )

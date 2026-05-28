@@ -267,7 +267,7 @@ async function handler(request: NextRequest): Promise<NextResponse> {
         is_recurring:  false,
         month,
         year,
-        scenario:      "budget",
+        scenario:      "budget_initial",
         sync_status:   "synced",
         synced_at:     now,
       })
