@@ -62,23 +62,36 @@ export async function POST(request: NextRequest) {
 
   const userId = session.user.id
 
+  // Sources supprimées par le reset — manual_saisie est intentionnellement exclu.
+  const DELETABLE_SOURCES = ["google_sheets", "csv_import"]
+
   // Count before delete so we can report how many rows were removed
   const { count: before } = await supabase
     .from("finance_entries")
     .select("*", { count: "exact", head: true })
     .eq("user_id", userId)
+    .in("source", DELETABLE_SOURCES)
 
   const { error: deleteError } = await supabase
     .from("finance_entries")
     .delete()
     .eq("user_id", userId)
+    .in("source", DELETABLE_SOURCES)
 
   if (deleteError) {
     return NextResponse.json({ error: deleteError.message }, { status: 500 })
   }
 
+  // Count what remains (manual_saisie rows — should be untouched)
+  const { count: remaining } = await supabase
+    .from("finance_entries")
+    .select("*", { count: "exact", head: true })
+    .eq("user_id", userId)
+
   return NextResponse.json({
-    deleted: before ?? 0,
-    message: `${before ?? 0} rows deleted from finance_entries. Run POST /api/sync/google-sheets to re-sync.`,
+    deleted:   before ?? 0,
+    remaining: remaining ?? 0,
+    sources:   DELETABLE_SOURCES,
+    message:   `${before ?? 0} lignes supprimées (sources: ${DELETABLE_SOURCES.join(", ")}). Les saisies manuelles sont préservées. Relancer POST /api/sync/google-sheets pour re-synchroniser.`,
   })
 }

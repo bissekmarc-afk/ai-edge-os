@@ -46,13 +46,34 @@ interface VarianceRow {
 }
 
 // ─── Variance computation ─────────────────────────────────────────────────────
+//
+// Budget entries are stored as positive values (even for expenses).
+// Actual expense entries can be stored as negative values (Cash Out negative).
+//
+// Normalisation rule before any comparison:
+//   expense → work with Math.abs() on both sides
+//             varianceEur = actual_abs - budget_abs
+//             negative = underspent (économie), positive = overspent (dépassement)
+//   income  → both sides already positive
+//             varianceEur = actual - budget
+//
+// Unfavourable triggers:
+//   expense : actual_abs > budget_abs × 1.15
+//   income  : actual     < budget     × 0.85
 
 function computeVariance(
-  actual:      number,
-  budget:      number,
+  actualRaw:   number,   // raw value from DB (may be negative for expenses)
+  budgetRaw:   number,   // raw value from DB (always positive)
   entryType:   "income" | "expense",
   isCurrent:   boolean,
 ): { varianceEur: number; variancePct: number | null; status: VarianceStatus } {
+
+  // Normalise to absolute values for expenses
+  const actual = entryType === "expense" ? Math.abs(actualRaw) : actualRaw
+  const budget = entryType === "expense" ? Math.abs(budgetRaw) : budgetRaw
+
+  // variance: positive = overspent (expense) or above target (income)
+  //           negative = underspent (expense) or below target (income)
   const varianceEur = actual - budget
 
   if (isCurrent) {
@@ -70,7 +91,7 @@ function computeVariance(
   const variancePct = (varianceEur / budget) * 100
 
   if (entryType === "expense") {
-    // Unfavourable: actual > budget × 1.15 (overspent by more than 15 %)
+    // Unfavourable: actual_abs > budget_abs × 1.15 (dépassement > 15 %)
     const status = actual > budget * 1.15 ? "unfavourable" : "ok"
     return { varianceEur, variancePct, status }
   }
@@ -141,6 +162,37 @@ export async function VarianceTable({
     getReforecastMonthRows(month, year),
   ])
 
+  // ── DEBUG LOGS ──────────────────────────────────────────────────────────────
+  console.log(
+    `[VarianceTable] ${year}-M${String(month).padStart(2, "0")} ──` +
+    ` actual=${actualRows.length} budget=${budgetRows.length} reforecast=${reforecastRows.length}`,
+  )
+
+  // Actual rows brutes
+  if (actualRows.length === 0) {
+    console.warn(`[VarianceTable] ⚠️  Aucune entrée actual pour ${year}-M${month}`)
+  } else {
+    console.log(`[VarianceTable] Actual rows brutes (${actualRows.length}) :`)
+    actualRows.forEach((r, i) => {
+      console.log(
+        `  [${i}] amount=${r.amount} entry_type=${r.entry_type}` +
+        ` category="${r.category}" label="${r.label}"` +
+        ` month=${r.month} year=${r.year} scenario=${(r as { scenario?: string }).scenario ?? "?"}`+
+        `  → matchKey="${matchKey(r)}"`,
+      )
+    })
+  }
+
+  // Budget rows + leurs matchKeys
+  console.log(`[VarianceTable] Budget rows (${budgetRows.length}) — 5 premiers :`)
+  budgetRows.slice(0, 5).forEach((r, i) => {
+    console.log(
+      `  [${i}] amount=${r.amount} entry_type=${r.entry_type}` +
+      ` category="${r.category}" label="${r.label}"` +
+      `  → matchKey="${matchKey(r)}"`,
+    )
+  })
+
   // Resolve active budget with reforecast overlay
   const activeBudget = applyReforecastOverlay(budgetRows, reforecastRows)
 
@@ -168,6 +220,13 @@ export async function VarianceTable({
     }
   }
 
+  // Matching report : quelles clés actual trouvent un budget, lesquelles non
+  console.log(`[VarianceTable] Matching actual → budget :`)
+  for (const [key, { amount }] of actualByKey) {
+    const hit = budgetByKey.has(key)
+    console.log(`  ${hit ? "✅ HIT " : "❌ MISS"} actual_amount=${amount}  key="${key}"`)
+  }
+
   // Collect all unique keys from both sides
   const allKeys = new Set([...budgetByKey.keys(), ...actualByKey.keys()])
 
@@ -177,8 +236,8 @@ export async function VarianceTable({
     const budgetSide = budgetByKey.get(key)
     const actualSide = actualByKey.get(key)
 
-    const budget    = budgetSide?.amount ?? 0
-    const actual    = actualSide?.amount ?? 0
+    const actualRaw = actualSide?.amount ?? 0
+    const budgetRaw = budgetSide?.amount ?? 0
     const entryType = (budgetSide?.entryType ?? actualSide?.entry?.entry_type ?? "expense") as "income" | "expense"
 
     const entry = actualSide?.entry ?? activeBudget.find(b => matchKey(b) === key)
@@ -187,11 +246,15 @@ export async function VarianceTable({
     const label    = String(entry?.label    ?? "")
 
     const { varianceEur, variancePct, status } = computeVariance(
-      actual,
-      budget,
+      actualRaw,
+      budgetRaw,
       entryType,
       isCurrent,
     )
+
+    // Normalised display values — expenses shown as positive for readability
+    const actual = entryType === "expense" ? Math.abs(actualRaw) : actualRaw
+    const budget = entryType === "expense" ? Math.abs(budgetRaw) : budgetRaw
 
     rows.push({ category, label, actual, budget, varianceEur, variancePct, status, entryType })
   }
