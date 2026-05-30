@@ -33,7 +33,7 @@ export async function getManualEntries(): Promise<ManualEntry[]> {
     .eq("source",   "manual_saisie")
     .neq("sync_status", "deleted")
     .order("created_at", { ascending: false })
-    .limit(10)
+    .limit(30)
 
   if (error || !data) return []
   return data as ManualEntry[]

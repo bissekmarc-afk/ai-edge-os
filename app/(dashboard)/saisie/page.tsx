@@ -1,8 +1,9 @@
-import { Suspense }          from "react"
-import { SectionHeading }    from "@/components/shared/section-heading"
-import { FinanceEntryForm }  from "@/components/finance/finance-entry-form"
+import { Suspense }           from "react"
+import { SectionHeading }     from "@/components/shared/section-heading"
+import { FinanceEntryForm }   from "@/components/finance/finance-entry-form"
 import { ManualEntriesTable } from "@/components/finance/manual-entries-table"
-import { Skeleton }          from "@/components/ui/skeleton"
+import { Skeleton }           from "@/components/ui/skeleton"
+import { getBudgetLabels }    from "@/lib/finance/queries"
 
 export const metadata = {
   title: "Saisie manuelle — AI Edge OS",
@@ -18,7 +19,11 @@ function TableSkeleton() {
   )
 }
 
-export default function SaisiePage() {
+export default async function SaisiePage() {
+  // Fetch budget labels server-side — passed as props so the Client Component
+  // never needs its own network call.
+  const budgetLabels = await getBudgetLabels()
+
   return (
     <div className="flex flex-col gap-8">
       <SectionHeading
@@ -28,7 +33,7 @@ export default function SaisiePage() {
 
       <div className="mx-auto w-full max-w-lg">
         <div className="rounded-xl border border-border bg-card p-4 sm:p-6">
-          <FinanceEntryForm />
+          <FinanceEntryForm budgetLabels={budgetLabels} />
         </div>
       </div>
 

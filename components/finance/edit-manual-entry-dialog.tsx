@@ -2,16 +2,24 @@
 
 import { useActionState, useEffect, useState, useTransition } from "react"
 import { useFormStatus } from "react-dom"
-import { Dialog } from "@base-ui/react/dialog"
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+} from "@/components/ui/dialog"
 import { updateManualFinanceEntry, type UpdateResult } from "@/app/actions/update-manual-finance-entry"
 import { deleteManualFinanceEntry }                    from "@/app/actions/delete-manual-finance-entry"
 import { SAISIE_CATEGORIES, SAISIE_SUBTYPES, CATEGORY_DISPLAY } from "@/lib/finance/saisie-schema"
 import type { ManualEntry } from "@/lib/finance/manual-entry-queries"
-import { Button }     from "@/components/ui/button"
-import { Input }      from "@/components/ui/input"
+import { Button }         from "@/components/ui/button"
+import { Input }          from "@/components/ui/input"
 import { buttonVariants } from "@/components/ui/button"
-import { cn }         from "@/lib/utils"
-import { Pencil, X, Trash2, AlertTriangle } from "lucide-react"
+import { cn }             from "@/lib/utils"
+import { Pencil, Trash2, AlertTriangle } from "lucide-react"
 
 // ─── Shared select className (h-12 for mobile) ───────────────────────────────
 
@@ -206,11 +214,11 @@ function EditForm({
 
       {/* Actions */}
       <div className="flex gap-3 pt-1">
-        <Dialog.Close
+        <DialogClose
           className={cn(buttonVariants({ variant: "outline" }), "h-11 flex-1")}
         >
           Annuler
-        </Dialog.Close>
+        </DialogClose>
         <SaveButton />
       </div>
     </form>
@@ -245,11 +253,11 @@ function DeleteSection({
 
   if (!confirming) {
     return (
-      <div className="border-t border-border pt-4 mt-2">
+      <div className="mt-2 border-t border-border pt-4">
         <button
           type="button"
           onClick={() => setConfirming(true)}
-          className="flex items-center gap-2 text-sm text-destructive/70 hover:text-destructive transition-colors"
+          className="flex items-center gap-2 text-sm text-destructive/70 transition-colors hover:text-destructive"
         >
           <Trash2 className="size-3.5" />
           Supprimer cette entrée
@@ -259,16 +267,14 @@ function DeleteSection({
   }
 
   return (
-    <div className="border-t border-destructive/20 pt-4 mt-2 rounded-lg bg-destructive/5 p-3">
-      <div className="flex items-start gap-2 mb-3">
-        <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+    <div className="mt-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 pt-4">
+      <div className="mb-3 flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
         <p className="text-sm text-destructive">
           Cette suppression est logique et définitive. L'entrée ne sera plus visible.
         </p>
       </div>
-      {error && (
-        <p className="mb-2 text-xs text-destructive">{error}</p>
-      )}
+      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
       <div className="flex gap-2">
         <Button
           type="button"
@@ -307,75 +313,35 @@ export function EditManualEntryDialog({ entry }: { entry: ManualEntry }) {
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog.Trigger
-        className={cn(
-          buttonVariants({ variant: "ghost", size: "xs" }),
-          "gap-1.5",
-        )}
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogTrigger
+        className={cn(buttonVariants({ variant: "ghost", size: "xs" }), "gap-1.5")}
       >
         <Pencil className="size-3" />
         Modifier
-      </Dialog.Trigger>
+      </DialogTrigger>
 
-      <Dialog.Portal>
-        {/* Backdrop */}
-        <Dialog.Backdrop
-          className={cn(
-            "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm",
-            "transition-opacity duration-150",
-            "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
-          )}
+      <DialogContent>
+        <DialogHeader className="mb-4">
+          <DialogTitle>Modifier l'entrée</DialogTitle>
+          <DialogDescription>
+            Supabase uniquement · Google Sheets non mis à jour
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Form — keyed so useActionState resets on each open */}
+        <EditForm
+          key={formKey}
+          entry={entry}
+          onSuccess={() => setOpen(false)}
         />
 
-        {/* Popup */}
-        <Dialog.Popup
-          className={cn(
-            "fixed left-1/2 top-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg",
-            "-translate-x-1/2 -translate-y-1/2",
-            "max-h-[90dvh] overflow-y-auto",
-            "rounded-xl border border-border bg-card p-5 shadow-xl",
-            "focus:outline-none",
-            "transition-all duration-150",
-            "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
-            "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
-          )}
-        >
-          {/* Header */}
-          <div className="mb-5 flex items-start justify-between gap-4">
-            <div>
-              <Dialog.Title className="text-base font-semibold text-foreground">
-                Modifier l'entrée
-              </Dialog.Title>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Supabase uniquement · Google Sheets non mis à jour
-              </p>
-            </div>
-            <Dialog.Close
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                "shrink-0",
-              )}
-              aria-label="Fermer"
-            >
-              <X className="size-4" />
-            </Dialog.Close>
-          </div>
-
-          {/* Form — keyed so useActionState resets on each open */}
-          <EditForm
-            key={formKey}
-            entry={entry}
-            onSuccess={() => setOpen(false)}
-          />
-
-          {/* Delete zone */}
-          <DeleteSection
-            entryId={entry.id}
-            onDeleted={() => setOpen(false)}
-          />
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
+        {/* Delete zone */}
+        <DeleteSection
+          entryId={entry.id}
+          onDeleted={() => setOpen(false)}
+        />
+      </DialogContent>
+    </Dialog>
   )
 }

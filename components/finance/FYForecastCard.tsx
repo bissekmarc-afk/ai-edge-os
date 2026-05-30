@@ -3,21 +3,28 @@
 // Displays two forward-looking estimates:
 //
 //   FY Forecast (Full Year):
-//     = Actual YTD (months already closed)
-//     + Active budget for current month
-//     + Active budget for future months
+//     = Actual YTD (closed months in budget scope: BUDGET_START_MONTH → currentMonth-1)
+//     + Actual for current month (not budget — real data if available)
+//     + Active budget for future months (currentMonth+1 → BUDGET_END_MONTH)
 //     Active budget = reforecast_6m overlay on budget_initial (per overlay rules)
 //
 //   Run Rate (annualised):
 //     = Average of the last 3 closed months of actual × 12
 //     Excludes: entry_subtype IN ('One-off','Seasonal','CAPEX'),
 //               is_non_cash = true, sync_status = 'deleted'
+//     Shows "N/A" if fewer than 3 closed months are available.
 
-import { cn }                           from "@/lib/utils"
-import { computePL }                    from "@/lib/finance/aggregations"
+import { cn }                    from "@/lib/utils"
+import { computePL }             from "@/lib/finance/aggregations"
 import { applyReforecastOverlay } from "@/lib/finance/reforecast-overlay"
-import { getAllScenariosForYear }        from "@/lib/finance/budget-queries"
-import type { FinanceEntry }            from "@/lib/finance/aggregations"
+import { getAllScenariosForYear } from "@/lib/finance/budget-queries"
+import type { FinanceEntry }     from "@/lib/finance/aggregations"
+
+// ─── Budget scope constants ───────────────────────────────────────────────────
+
+const BUDGET_START_MONTH = 5     // Google Sheets budget starts in May 2026
+const BUDGET_START_YEAR  = 2026
+const BUDGET_END_MONTH   = 12
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 
@@ -27,8 +34,12 @@ const EUR = new Intl.NumberFormat("fr-FR", {
   maximumFractionDigits: 0,
 })
 
-function fmtEur(n: number) { return EUR.format(n) }
+function fmtEur(n: number)    { return EUR.format(n) }
 function fmtSigned(n: number) { return `${n >= 0 ? "+" : ""}${fmtEur(n)}` }
+
+function fmtMonth(month: number): string {
+  return new Date(2000, month - 1, 1).toLocaleString("fr-FR", { month: "long" })
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -37,14 +48,25 @@ function sumNetCashFlow(rows: FinanceEntry[]): number {
   return computePL(rows).netCashFlow
 }
 
-/** Returns the set of months strictly before currentMonth in the same year. */
+/**
+ * Closed months = months in budget scope that are strictly before currentMonth.
+ * Scope starts at BUDGET_START_MONTH, not at January.
+ */
 function closedMonths(currentMonth: number): number[] {
-  return Array.from({ length: currentMonth - 1 }, (_, i) => i + 1)
+  const start = BUDGET_START_MONTH
+  const end   = currentMonth - 1
+  if (end < start) return []
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i)
 }
 
-/** Returns the set of months strictly after currentMonth in the same year. */
+/**
+ * Future months = months strictly after currentMonth, up to BUDGET_END_MONTH.
+ */
 function futureMonths(currentMonth: number): number[] {
-  return Array.from({ length: 12 - currentMonth }, (_, i) => currentMonth + 1 + i)
+  const start = currentMonth + 1
+  const end   = BUDGET_END_MONTH
+  if (start > end) return []
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i)
 }
 
 /** Filter rows to a specific month. */
@@ -108,25 +130,22 @@ export async function FYForecastCard({
   currentMonth,
   currentYear,
 }: FYForecastCardProps) {
-  // Only compute FY forecast for the current year
-  if (year !== currentYear) return null
+  // Only compute FY forecast for the current year and within budget scope
+  if (year !== currentYear || year !== BUDGET_START_YEAR) return null
 
   const { actual, budget_initial, reforecast_6m } = await getAllScenariosForYear(year)
 
   // ── FY Forecast ────────────────────────────────────────────────────────────
 
-  // 1. Actual YTD: sum of all closed months (months < currentMonth)
-  const closed = closedMonths(currentMonth)
-  const actualYtd = actual.filter(r => r.month !== null && closed.includes(r.month as number))
+  // 1. Actual YTD: closed months in budget scope (BUDGET_START_MONTH → currentMonth-1)
+  const closed       = closedMonths(currentMonth)
+  const actualYtd    = actual.filter(r => r.month !== null && closed.includes(r.month as number))
   const actualYtdNcf = sumNetCashFlow(actualYtd)
 
-  // 2. Active budget for current month
-  const curBudget      = forMonth(budget_initial, currentMonth)
-  const curReforecast  = forMonth(reforecast_6m,  currentMonth)
-  const curActiveBudget = applyReforecastOverlay(curBudget, curReforecast)
-  const curMonthNcf    = sumNetCashFlow(curActiveBudget)
+  // 2. Current month: use actual data (not budget) — real figures if already entered
+  const curActualNcf = sumNetCashFlow(forMonth(actual, currentMonth))
 
-  // 3. Active budget for future months
+  // 3. Active budget for future months (currentMonth+1 → BUDGET_END_MONTH)
   const future = futureMonths(currentMonth)
   let futureNcf = 0
   for (const m of future) {
@@ -136,31 +155,33 @@ export async function FYForecastCard({
     futureNcf += sumNetCashFlow(mActive)
   }
 
-  const fyForecast = actualYtdNcf + curMonthNcf + futureNcf
+  // FY Forecast = Actual YTD + Current month actual + Future budget
+  const fyForecast = actualYtdNcf + curActualNcf + futureNcf
 
   // ── Run Rate ───────────────────────────────────────────────────────────────
 
-  // Last 3 closed months (most recent first)
+  // Last 3 closed months in budget scope (most recent first)
   const last3 = closed.slice(-3)
 
-  let runRateTotal = 0
+  let runRateTotal  = 0
   let runRateMonths = 0
 
   for (const m of last3) {
-    const monthActual = actual
-      .filter(r => r.month === m && isRunRateEligible(r))
+    const monthActual = actual.filter(r => r.month === m && isRunRateEligible(r))
     if (monthActual.length > 0) {
       runRateTotal += computePL(monthActual).netCashFlow
       runRateMonths++
     }
   }
 
-  const runRate =
-    runRateMonths > 0 ? (runRateTotal / runRateMonths) * 12 : 0
+  // Show "N/A" if fewer than 3 closed months — run rate is not meaningful yet
+  const runRateReady = runRateMonths >= 3
+  const runRate      = runRateReady ? (runRateTotal / runRateMonths) * 12 : 0
 
   // ── Budget YE (for comparison) ─────────────────────────────────────────────
+  // Scope: BUDGET_START_MONTH → BUDGET_END_MONTH (not January → December)
   let totalBudgetNcf = 0
-  for (let m = 1; m <= 12; m++) {
+  for (let m = BUDGET_START_MONTH; m <= BUDGET_END_MONTH; m++) {
     const mBudget     = forMonth(budget_initial, m)
     const mReforecast = forMonth(reforecast_6m,  m)
     const mActive     = applyReforecastOverlay(mBudget, mReforecast)
@@ -171,6 +192,8 @@ export async function FYForecastCard({
   const fyHighlight    = fyForecast >= 0 ? "success" : "danger"
   const rrHighlight    = runRate    >= 0 ? "success" : "danger"
   const vsBudHighlight = fyVsBudget >= 0 ? "success" : "danger"
+
+  const curMonthName = fmtMonth(currentMonth)
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -185,36 +208,60 @@ export async function FYForecastCard({
         <KpiTile
           label="FY Forecast NCF"
           value={fmtEur(fyForecast)}
-          sub={`YTD ${fmtEur(actualYtdNcf)} + Budget restant ${fmtEur(curMonthNcf + futureNcf)}`}
+          sub={
+            closed.length > 0
+              ? `YTD ${fmtEur(actualYtdNcf)} · ${curMonthName} ${fmtEur(curActualNcf)} · Budget restant ${fmtEur(futureNcf)}`
+              : `${curMonthName} actual ${fmtEur(curActualNcf)} · Budget restant ${fmtEur(futureNcf)}`
+          }
           highlight={fyHighlight}
         />
         <KpiTile
           label="Run Rate × 12"
-          value={fmtEur(runRate)}
-          sub={`Moyenne ${runRateMonths} mois clôturés (excl. one-offs)`}
-          highlight={rrHighlight}
+          value={runRateReady ? fmtEur(runRate) : "N/A"}
+          sub={
+            runRateReady
+              ? `Moyenne ${runRateMonths} mois clôturés (excl. one-offs)`
+              : `${runRateMonths}/3 mois clôturés — disponible en ${fmtMonth(BUDGET_START_MONTH + 2)}`
+          }
+          highlight={runRateReady ? rrHighlight : "neutral"}
         />
         <KpiTile
           label="FY vs Budget"
           value={fmtSigned(fyVsBudget)}
-          sub={`Budget actif : ${fmtEur(totalBudgetNcf)}`}
+          sub={`Budget actif (mai–déc) : ${fmtEur(totalBudgetNcf)}`}
           highlight={vsBudHighlight}
         />
       </div>
 
       {/* YTD detail bar */}
       <div className="border-t border-border/50 px-4 py-2">
-        <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
           <span>
-            Mois clôturés : <strong className="text-foreground">{closed.length}</strong>
+            Mois clôturés :{" "}
+            <strong className="text-foreground">
+              {closed.length === 0
+                ? "0 (budget démarré ce mois)"
+                : closed.length}
+            </strong>
           </span>
           <span>·</span>
           <span>
-            Mois restants : <strong className="text-foreground">{12 - closed.length}</strong>
+            {curMonthName} actual :{" "}
+            <strong className="text-foreground">{fmtEur(curActualNcf)}</strong>
           </span>
+          {closed.length > 0 && (
+            <>
+              <span>·</span>
+              <span>
+                Actual YTD :{" "}
+                <strong className="text-foreground">{fmtEur(actualYtdNcf)}</strong>
+              </span>
+            </>
+          )}
           <span>·</span>
           <span>
-            Actual YTD : <strong className="text-foreground">{fmtEur(actualYtdNcf)}</strong>
+            Mois restants :{" "}
+            <strong className="text-foreground">{future.length}</strong>
           </span>
         </div>
       </div>

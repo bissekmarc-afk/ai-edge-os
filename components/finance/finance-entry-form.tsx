@@ -1,9 +1,10 @@
 "use client"
 
-import { useActionState, useEffect, useRef } from "react"
+import { useActionState, useEffect, useRef, useState } from "react"
 import { useFormStatus } from "react-dom"
 import { createFinanceEntry, type ActionResult } from "@/app/actions/create-finance-entry"
 import { SAISIE_CATEGORIES, SAISIE_SUBTYPES, CATEGORY_DISPLAY } from "@/lib/finance/saisie-schema"
+import type { BudgetLabel } from "@/lib/finance/queries"
 import { Button } from "@/components/ui/button"
 import { Input }  from "@/components/ui/input"
 import { cn }     from "@/lib/utils"
@@ -53,16 +54,44 @@ const labelCn = "mb-2 block text-sm font-medium text-foreground"
 
 // ─── Form ─────────────────────────────────────────────────────────────────────
 
-export function FinanceEntryForm() {
+interface FinanceEntryFormProps {
+  budgetLabels?: BudgetLabel[]
+}
+
+export function FinanceEntryForm({ budgetLabels = [] }: FinanceEntryFormProps) {
   const [state, formAction] = useActionState<ActionResult | null, FormData>(
     createFinanceEntry,
     null,
   )
-  const formRef = useRef<HTMLFormElement>(null)
+  const formRef    = useRef<HTMLFormElement>(null)
+  const labelBoxRef = useRef<HTMLDivElement>(null)
 
+  // ── Combobox state ─────────────────────────────────────────────────────────
+  const [labelValue, setLabelValue]   = useState("")
+  const [labelOpen,  setLabelOpen]    = useState(false)
+
+  // Filtered suggestions: all when empty, substring-filtered when typing
+  const suggestions = budgetLabels.filter(b =>
+    !labelValue || b.label.toLowerCase().includes(labelValue.toLowerCase()),
+  ).slice(0, 10)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (labelBoxRef.current && !labelBoxRef.current.contains(e.target as Node)) {
+        setLabelOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown)
+    return () => document.removeEventListener("mousedown", onMouseDown)
+  }, [])
+
+  // Reset form and combobox value on successful submit
   useEffect(() => {
     if (state?.status === "success") {
       formRef.current?.reset()
+      setLabelValue("")
+      setLabelOpen(false)
     }
   }, [state])
 
@@ -113,20 +142,73 @@ export function FinanceEntryForm() {
         <FieldError errors={fieldErrors} name="date" />
       </div>
 
-      {/* ── Libellé ───────────────────────────────────────────────────── */}
+      {/* ── Libellé — combobox avec suggestions budget DAF ───────────── */}
       <div>
         <label htmlFor="saisie-label" className={labelCn}>
           Libellé
+          {budgetLabels.length > 0 && (
+            <span className="ml-2 font-normal text-muted-foreground">
+              ({budgetLabels.length} labels budget disponibles)
+            </span>
+          )}
         </label>
-        <Input
-          id="saisie-label"
-          name="label"
-          type="text"
-          placeholder="Ex : Loyer mai 2026"
-          className="h-12 text-base"
-          aria-invalid={!!fieldErrors?.label}
-          required
-        />
+
+        <div ref={labelBoxRef} className="relative">
+          <Input
+            id="saisie-label"
+            name="label"
+            type="text"
+            value={labelValue}
+            onChange={e => {
+              setLabelValue(e.target.value)
+              setLabelOpen(true)
+            }}
+            onFocus={() => setLabelOpen(true)}
+            placeholder="Chercher ou saisir un libellé…"
+            className="h-12 text-base"
+            aria-invalid={!!fieldErrors?.label}
+            aria-autocomplete="list"
+            aria-expanded={labelOpen && suggestions.length > 0}
+            autoComplete="off"
+            required
+          />
+
+          {/* Dropdown suggestions */}
+          {labelOpen && suggestions.length > 0 && (
+            <ul
+              role="listbox"
+              className="absolute left-0 right-0 top-[calc(100%+4px)] z-20 max-h-56 overflow-y-auto rounded-lg border border-border bg-card shadow-lg"
+            >
+              {suggestions.map((b, i) => (
+                <li key={i} role="option">
+                  <button
+                    type="button"
+                    onMouseDown={e => {
+                      // preventDefault keeps the input focused while clicking
+                      e.preventDefault()
+                      setLabelValue(b.label)
+                      setLabelOpen(false)
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted"
+                  >
+                    <span className="font-medium text-foreground">{b.label}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">{b.category}</span>
+                  </button>
+                </li>
+              ))}
+
+              {/* Custom value hint — shown only when typed value ≠ any suggestion */}
+              {labelValue.trim() !== "" &&
+               !suggestions.some(b => b.label.toLowerCase() === labelValue.toLowerCase()) && (
+                <li className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                  ↵ Valeur personnalisée :{" "}
+                  <span className="font-medium text-foreground">{labelValue}</span>
+                </li>
+              )}
+            </ul>
+          )}
+        </div>
+
         <FieldError errors={fieldErrors} name="label" />
       </div>
 

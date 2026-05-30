@@ -84,10 +84,17 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
   const prevM = month === 1 ? 12 : month - 1
   const prevY = month === 1 ? year - 1 : year
 
-  // Fetch everything in parallel
+  // Map UI scenario → DB scenario for P&L and chart queries.
+  // 'variance' is handled by VarianceTable; the P&L shows actual as baseline.
+  const dbScenario: "actual" | "budget_initial" | "reforecast_6m" =
+    scenario === "budget_initial"  ? "budget_initial"  :
+    scenario === "reforecast_6m"   ? "reforecast_6m"   :
+    "actual"  // covers 'actual' and 'variance'
+
+  // Fetch everything in parallel — month/year rows filtered by scenario
   const [monthRows, yearRows, wealthAssets, nonCashRows, prevNonCashRows] = await Promise.all([
-    getMonthRows(month, year),
-    getYearRows(year),
+    getMonthRows(month, year, dbScenario),
+    getYearRows(year, dbScenario),
     getLatestWealthSnapshots(),
     getNonCashRows(month, year),
     getNonCashRows(prevM, prevY),
@@ -96,6 +103,13 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
   const pl              = computePL(monthRows)
   const yearlySummaries = computeYearSummaries(yearRows, year)
   const balanceSheet    = computeBalanceSheet(nonCashRows, month, year, prevNonCashRows)
+
+  // For budget/reforecast, the chart must not show empty Jan-Apr bars.
+  // computeYearSummaries always produces 12 slots — trim the dead ones here.
+  const chartData =
+    (dbScenario === "budget_initial" || dbScenario === "reforecast_6m")
+      ? yearlySummaries.filter(s => s.month >= 5)
+      : yearlySummaries
   const wealthTotal     = wealthAssets.length > 0
     ? wealthAssets.reduce((s, a) => s + Number(a.amount), 0)
     : undefined
@@ -152,7 +166,7 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
               Revenus · Dépenses opérat. · Debt Service · Net Cash Flow
             </p>
           </div>
-          <PLCashflowChart data={yearlySummaries} />
+          <PLCashflowChart data={chartData} />
         </div>
       </div>
 

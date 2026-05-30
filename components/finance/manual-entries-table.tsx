@@ -71,9 +71,9 @@ export async function ManualEntriesTable() {
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       {/* Desktop table — hidden on small screens */}
-      <div className="hidden sm:block overflow-x-auto">
+      <div className="hidden sm:block overflow-x-auto max-h-[520px] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead>
+          <thead className="sticky top-0 z-10">
             <tr className="border-b border-border bg-muted/40">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">Libellé</th>
@@ -116,7 +116,7 @@ export async function ManualEntriesTable() {
       </div>
 
       {/* Mobile cards — shown only on small screens */}
-      <ul className="sm:hidden divide-y divide-border">
+      <ul className="sm:hidden divide-y divide-border max-h-[520px] overflow-y-auto">
         {entries.map((entry) => (
           <li key={entry.id} className="flex flex-col gap-2 px-4 py-4">
             <div className="flex items-start justify-between gap-3">

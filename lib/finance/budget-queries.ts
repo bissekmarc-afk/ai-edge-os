@@ -6,6 +6,15 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import type { FinanceEntry } from "./aggregations"
 
+// ─── Budget scope constants ───────────────────────────────────────────────────
+//
+// The Google Sheets budget covers May 2026 → December 2026.
+// Any request for an earlier month must return an empty array — there is no
+// budget data before May 2026 and stale rows must never leak through.
+
+const BUDGET_START_MONTH = 5
+const BUDGET_START_YEAR  = 2026
+
 // ─── Common select fragment ───────────────────────────────────────────────────
 
 const ENTRY_SELECT =
@@ -40,6 +49,9 @@ export async function getBudgetMonthRows(
   month: number,
   year:  number,
 ): Promise<FinanceEntry[]> {
+  // Budget scope: May 2026 → December 2026 — reject out-of-scope months
+  if (year !== BUDGET_START_YEAR || month < BUDGET_START_MONTH) return []
+
   const supabase = await createSupabaseServerClient()
   if (!supabase) return []
 
@@ -61,6 +73,9 @@ export async function getReforecastMonthRows(
   month: number,
   year:  number,
 ): Promise<FinanceEntry[]> {
+  // Reforecast shares the same budget scope: May 2026 → December 2026
+  if (year !== BUDGET_START_YEAR || month < BUDGET_START_MONTH) return []
+
   const supabase = await createSupabaseServerClient()
   if (!supabase) return []
 
@@ -107,10 +122,21 @@ export async function getAllScenariosForYear(year: number): Promise<YearScenario
 
   const result: YearScenarioRows = { actual: [], budget_initial: [], reforecast_6m: [] }
   for (const row of data) {
-    const s = (row as { scenario: string }).scenario
-    if (s === "actual")         result.actual.push(row as FinanceEntry)
-    else if (s === "budget_initial") result.budget_initial.push(row as FinanceEntry)
-    else if (s === "reforecast_6m")  result.reforecast_6m.push(row as FinanceEntry)
+    const s = (row as { scenario: string; month: number }).scenario
+    const m = (row as { scenario: string; month: number }).month
+    if (s === "actual") {
+      result.actual.push(row as FinanceEntry)
+    } else if (s === "budget_initial") {
+      // Budget scope: May 2026 → December 2026 only
+      if (year === BUDGET_START_YEAR && m >= BUDGET_START_MONTH) {
+        result.budget_initial.push(row as FinanceEntry)
+      }
+    } else if (s === "reforecast_6m") {
+      // Reforecast shares the same scope
+      if (year === BUDGET_START_YEAR && m >= BUDGET_START_MONTH) {
+        result.reforecast_6m.push(row as FinanceEntry)
+      }
+    }
   }
   return result
 }
