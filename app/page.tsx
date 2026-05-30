@@ -1,38 +1,21 @@
-import { CheckSquare, DollarSign, BookOpen, Dumbbell, Brain } from "lucide-react"
+import { CheckSquare, DollarSign } from "lucide-react"
 import { CommandCenterHeader } from "@/components/dashboard/command-center-header"
 import { AIDailyBrief } from "@/components/dashboard/ai-daily-brief"
 import { KpiCard } from "@/components/dashboard/kpi-card"
 import { TodayFocus } from "@/components/dashboard/today-focus"
-import { LifeBlockCard } from "@/components/dashboard/life-block-card"
-import { HabitsTracker } from "@/components/dashboard/habits-tracker"
-import { SyncActivityFeed } from "@/components/dashboard/sync-activity-feed"
-import {
-  getTopTasks,
-  getMonthlyBudgetSummary,
-  getReadingSummary,
-  getTrainingSummary,
-  getMemorySummary,
-  mockHabits,
-  mockGymSessions,
-  mockBoxingSessions,
-  mockReadingItems,
-  getSyncActivity,
-} from "@/lib/mock-data"
 import { getTasksFromSupabase } from "@/lib/queries/tasks"
 import { getBudgetSummaryFromSupabase } from "@/lib/queries/finance"
 
+const MONTHS_FR = [
+  "janv.", "févr.", "mars", "avr.", "mai", "juin",
+  "juil.", "août", "sept.", "oct.", "nov.", "déc.",
+]
+
 export default async function CommandCenterPage() {
-  const [supabaseTasks, supabaseBudget, mockTopTasks] = await Promise.all([
+  const [tasks, budget] = await Promise.all([
     getTasksFromSupabase(5),
     getBudgetSummaryFromSupabase(),
-    Promise.resolve(getTopTasks(5)),
   ])
-  const topTasks = supabaseTasks.length > 0 ? supabaseTasks : mockTopTasks
-  const budget = supabaseBudget ?? getMonthlyBudgetSummary()
-  const reading = getReadingSummary()
-  const training = getTrainingSummary()
-  const memory = getMemorySummary()
-  const syncActivities = getSyncActivity()
 
   const formatEur = (n: number) =>
     new Intl.NumberFormat("fr-FR", {
@@ -40,6 +23,14 @@ export default async function CommandCenterPage() {
       currency: "EUR",
       maximumFractionDigits: 0,
     }).format(n)
+
+  const urgentOrHigh = tasks.filter(
+    (t) => t.priority === "urgent" || t.priority === "high",
+  ).length
+
+  const budgetMonthLabel = budget
+    ? `Budget ${MONTHS_FR[budget.month - 1]} ${budget.year}`
+    : "Budget du mois"
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,92 +40,41 @@ export default async function CommandCenterPage() {
 
       <section>
         <h2 className="mb-3 text-base font-semibold text-foreground">Vue d&apos;ensemble</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3">
           <KpiCard
             title="Tâches actives"
-            value={String(topTasks.length)}
-            sub="5 prioritaires"
+            value={tasks.length > 0 ? String(tasks.length) : "—"}
+            sub={
+              tasks.length === 0
+                ? "Données non disponibles"
+                : urgentOrHigh > 0
+                  ? `${urgentOrHigh} haute priorité`
+                  : "Toutes en cours"
+            }
             icon={<CheckSquare className="size-4" />}
             trend="neutral"
           />
           <KpiCard
-            title="Budget mai"
-            value={formatEur(budget.balance)}
-            sub={`Dépenses : ${formatEur(budget.expenses)}`}
+            title={budgetMonthLabel}
+            value={budget ? formatEur(budget.balance) : "—"}
+            sub={
+              budget
+                ? `Dépenses : ${formatEur(budget.expenses)}`
+                : "Données non disponibles"
+            }
             icon={<DollarSign className="size-4" />}
-            trend="up"
-          />
-          <KpiCard
-            title="Lecture"
-            value={`${reading.reading} en cours`}
-            sub={`${reading.completed} terminés`}
-            icon={<BookOpen className="size-4" />}
-            trend="up"
-          />
-          <KpiCard
-            title="Entraînement"
-            value={`${training.gymSessions + training.boxingSessions}`}
-            sub={`${Math.round(training.totalMinutes / 60)}h ce mois`}
-            icon={<Dumbbell className="size-4" />}
-            trend="up"
-          />
-          <KpiCard
-            title="Mémoire"
-            value={`${memory.confirmed}/${memory.total}`}
-            sub="entrées confirmées"
-            icon={<Brain className="size-4" />}
-            trend="neutral"
+            trend={
+              budget
+                ? budget.balance >= 0
+                  ? "up"
+                  : "down"
+                : "neutral"
+            }
           />
         </div>
       </section>
 
-      <TodayFocus tasks={topTasks} />
-
-      <section>
-        <h2 className="mb-3 text-base font-semibold text-foreground">Life Blocks</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <LifeBlockCard
-            title="Lecture"
-            icon={<BookOpen className="size-4 text-[var(--ai-accent)]" />}
-            stats={[
-              { label: "En cours", value: `${reading.reading} livre${reading.reading > 1 ? "s" : ""}` },
-              { label: "Terminés", value: String(reading.completed) },
-              { label: "Progression moy.", value: `${reading.avgProgress}%` },
-              { label: "À lire", value: String(mockReadingItems.filter((r) => r.status === "to_read").length) },
-            ]}
-            progress={reading.avgProgress}
-            progressLabel="Progression lecture en cours"
-          />
-          <LifeBlockCard
-            title="Finance"
-            icon={<DollarSign className="size-4 text-[var(--success)]" />}
-            stats={[
-              { label: "Revenus", value: formatEur(budget.income) },
-              { label: "Dépenses", value: formatEur(budget.expenses) },
-              { label: "Solde", value: formatEur(budget.balance) },
-              { label: "Épargne", value: "20%" },
-            ]}
-            progress={Math.round((budget.expenses / budget.income) * 100)}
-            progressLabel="Dépenses vs revenus"
-          />
-          <LifeBlockCard
-            title="Gym & Boxe"
-            icon={<Dumbbell className="size-4 text-[var(--warning)]" />}
-            stats={[
-              { label: "Séances gym", value: String(mockGymSessions.length) },
-              { label: "Séances boxe", value: String(mockBoxingSessions.length) },
-              { label: "Total", value: `${Math.round(training.totalMinutes / 60)}h` },
-              { label: "Dernière", value: new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" }).format(new Date(training.lastSession)) },
-            ]}
-            progress={training.gymSessions >= 3 ? 100 : Math.round((training.gymSessions / 3) * 100)}
-            progressLabel="Objectif 3 séances gym/sem."
-          />
-        </div>
-      </section>
-
-      <HabitsTracker habits={mockHabits} />
-
-      <SyncActivityFeed activities={syncActivities} />
+      <TodayFocus tasks={tasks} />
     </div>
   )
 }

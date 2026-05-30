@@ -3,7 +3,12 @@
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Send, X, Sparkles, ChevronUp, Check, Brain } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { mockAICommands } from "@/lib/mock-data"
+
+const QUICK_COMMANDS = [
+  { id: "q1", label: "Brief du jour",  prompt: "Donne-moi un résumé de mes priorités pour aujourd'hui." },
+  { id: "q2", label: "Revue semaine",  prompt: "Aide-moi à faire ma revue de la semaine." },
+  { id: "q3", label: "Budget du mois", prompt: "Analyse ma situation budget du mois en cours." },
+]
 
 interface AICommandBarProps {
   marginLeft: number
@@ -263,7 +268,7 @@ export function AICommandBar({ marginLeft }: AICommandBarProps) {
               <span>Demande quelque chose à Claude…</span>
             </button>
             <div className="hidden items-center gap-1 sm:flex">
-              {mockAICommands.slice(0, 3).map((cmd) => (
+              {QUICK_COMMANDS.map((cmd) => (
                 <button
                   key={cmd.id}
                   onClick={() => handleQuickCommand(cmd.prompt)}
