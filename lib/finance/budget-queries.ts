@@ -117,6 +117,7 @@ export async function getAllScenariosForYear(year: number): Promise<YearScenario
     .eq("is_non_cash", false)
     .in("scenario",    ["actual", "budget_initial", "reforecast_6m"])
     .neq("sync_status", "deleted")
+    .not("month",      "is", null)   // exclude rows with null month
 
   if (error || !data) return empty
 
@@ -138,5 +139,17 @@ export async function getAllScenariosForYear(year: number): Promise<YearScenario
       }
     }
   }
+
+  // ── Debug: show which months are present per scenario ──────────────────────
+  const months = (arr: FinanceEntry[]) =>
+    [...new Set(arr.map(r => r.month))].sort((a, b) => (a ?? 0) - (b ?? 0)).join(",")
+
+  console.log(
+    `[getAllScenariosForYear] year=${year}` +
+    ` | actual: ${result.actual.length} rows, months=[${months(result.actual)}]` +
+    ` | budget_initial: ${result.budget_initial.length} rows, months=[${months(result.budget_initial)}]` +
+    ` | reforecast_6m: ${result.reforecast_6m.length} rows, months=[${months(result.reforecast_6m)}]`,
+  )
+
   return result
 }

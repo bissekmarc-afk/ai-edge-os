@@ -148,12 +148,62 @@ export async function FYForecastCard({
   // 3. Active budget for future months (currentMonth+1 → BUDGET_END_MONTH)
   const future = futureMonths(currentMonth)
   let futureNcf = 0
+
+  console.log(
+    `[FYForecastCard] budget_initial=${budget_initial.length} rows` +
+    ` | reforecast_6m=${reforecast_6m.length} rows` +
+    ` | future months: [${future.join(",")}]`,
+  )
+
+  // Months where the Sheets NCF is known (for inline diff logging)
+  const SHEETS_NCF: Record<number, number> = { 6: 367, 7: -2940, 8: 1724, 9: -980, 10: -1304, 11: 657, 12: -487 }
+
   for (const m of future) {
     const mBudget     = forMonth(budget_initial, m)
     const mReforecast = forMonth(reforecast_6m,  m)
     const mActive     = applyReforecastOverlay(mBudget, mReforecast)
-    futureNcf += sumNetCashFlow(mActive)
+    const mPl         = computePL(mActive)
+    const mNcf        = mPl.netCashFlow
+    futureNcf        += mNcf
+
+    const sheetsDiff = SHEETS_NCF[m] !== undefined
+      ? ` | Δvs_sheets=${(mNcf - SHEETS_NCF[m]).toFixed(0)}`
+      : ""
+
+    console.log(
+      `[FYForecastCard] m=${m}` +
+      ` budget_rows=${mBudget.length} active_rows=${mActive.length}` +
+      ` | ncf=${mNcf}` +
+      ` (income=${mPl.grossIncome} taxes=${mPl.taxes}` +
+      ` fixed=${mPl.fixedCosts} var=${mPl.variableCosts}` +
+      ` oneOff=${mPl.oneOff} debt=${mPl.debtService} capex=${mPl.capex})` +
+      sheetsDiff,
+    )
+
+    // Full per-bucket breakdown — every entry, grouped by bucket
+    type BucketGroup = { total: number; lines: string[] }
+    const byBucket = new Map<string, BucketGroup>()
+    for (const item of mPl.classifiedEntries) {
+      if (item.bucket === "ignored" || item.normalizedAmount === 0) continue
+      const bg = byBucket.get(item.bucket) ?? { total: 0, lines: [] }
+      bg.total += item.normalizedAmount
+      bg.lines.push(
+        `"${item.entry.label}" ${item.normalizedAmount}` +
+        ` [${item.entry.entry_type ?? "?"}/${item.entry.flux_nature ?? "?"}` +
+        ` cat=${item.entry.category ?? "?"} sub=${item.entry.entry_subtype ?? "-"}]` +
+        ` → ${item.reason}`,
+      )
+      byBucket.set(item.bucket, bg)
+    }
+    for (const [bucket, { total, lines }] of byBucket) {
+      console.log(`  ▸ [${bucket}] total=${total.toFixed(2)}`)
+      for (const line of lines) {
+        console.log(`      ${line}`)
+      }
+    }
   }
+
+  console.log(`[FYForecastCard] futureNcf total=${futureNcf} over ${future.length} months`)
 
   // FY Forecast = Actual YTD + Current month actual + Future budget
   const fyForecast = actualYtdNcf + curActualNcf + futureNcf
@@ -181,11 +231,14 @@ export async function FYForecastCard({
   // ── Budget YE (for comparison) ─────────────────────────────────────────────
   // Scope: BUDGET_START_MONTH → BUDGET_END_MONTH (not January → December)
   let totalBudgetNcf = 0
+  console.log(`[FYForecastCard] Budget YE loop (m=${BUDGET_START_MONTH}→${BUDGET_END_MONTH}):`)
   for (let m = BUDGET_START_MONTH; m <= BUDGET_END_MONTH; m++) {
     const mBudget     = forMonth(budget_initial, m)
     const mReforecast = forMonth(reforecast_6m,  m)
     const mActive     = applyReforecastOverlay(mBudget, mReforecast)
-    totalBudgetNcf += sumNetCashFlow(mActive)
+    const mNcf        = sumNetCashFlow(mActive)
+    totalBudgetNcf   += mNcf
+    console.log(`  m=${m}: rows=${mActive.length} ncf=${mNcf} (running=${totalBudgetNcf})`)
   }
 
   const fyVsBudget     = fyForecast - totalBudgetNcf

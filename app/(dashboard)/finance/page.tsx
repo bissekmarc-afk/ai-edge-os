@@ -91,10 +91,14 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
     scenario === "reforecast_6m"   ? "reforecast_6m"   :
     "actual"  // covers 'actual' and 'variance'
 
-  // Fetch everything in parallel — month/year rows filtered by scenario
-  const [monthRows, yearRows, wealthAssets, nonCashRows, prevNonCashRows] = await Promise.all([
+  // Fetch everything in parallel — month/year rows filtered by scenario.
+  // We also fetch budget_initial rows separately whenever the primary scenario
+  // is not budget_initial, so the chart can draw a dashed "Budget (cumul)"
+  // reference line alongside the actual/reforecast cash-position curve.
+  const [monthRows, yearRows, budgetYearRows, wealthAssets, nonCashRows, prevNonCashRows] = await Promise.all([
     getMonthRows(month, year, dbScenario),
     getYearRows(year, dbScenario),
+    dbScenario !== "budget_initial" ? getYearRows(year, "budget_initial") : Promise.resolve([]),
     getLatestWealthSnapshots(),
     getNonCashRows(month, year),
     getNonCashRows(prevM, prevY),
@@ -110,6 +114,13 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
     (dbScenario === "budget_initial" || dbScenario === "reforecast_6m")
       ? yearlySummaries.filter(s => s.month >= 5)
       : yearlySummaries
+
+  // Budget reference line — only when not already viewing budget data.
+  // getYearRows already enforces month >= 5 for budget_initial, so no
+  // extra filter is needed beyond what computeYearSummaries produces.
+  const budgetChartData = dbScenario !== "budget_initial" && budgetYearRows.length > 0
+    ? computeYearSummaries(budgetYearRows, year).filter(s => s.month >= 5)
+    : undefined
   const wealthTotal     = wealthAssets.length > 0
     ? wealthAssets.reduce((s, a) => s + Number(a.amount), 0)
     : undefined
@@ -166,7 +177,7 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
               Revenus · Dépenses opérat. · Debt Service · Net Cash Flow
             </p>
           </div>
-          <PLCashflowChart data={chartData} />
+          <PLCashflowChart data={chartData} budgetData={budgetChartData} />
         </div>
       </div>
 

@@ -100,11 +100,12 @@ function isOneOf(value: string, values: string[]): boolean {
 // ─── Entry classifier ─────────────────────────────────────────────────────────
 
 function classifyEntry(entry: FinanceEntry): ClassifiedEntry {
-  const category = normalizeText(entry.category)
-  const subtype  = normalizeText(entry.entry_subtype)
-  const label    = normalizeText(entry.label)
-  const flux     = normalizeText(entry.flux_nature)
-  const amount   = normalizeAmount(entry)
+  const category  = normalizeText(entry.category)
+  const subtype   = normalizeText(entry.entry_subtype)
+  const label     = normalizeText(entry.label)
+  const flux      = normalizeText(entry.flux_nature)
+  const entryType = normalizeText(entry.entry_type)   // normalise "Revenue"/"Income" → "revenue"/"income"
+  const amount    = normalizeAmount(entry)
 
   if (!isCashEntry(entry)) {
     return {
@@ -115,8 +116,12 @@ function classifyEntry(entry: FinanceEntry): ClassifiedEntry {
     }
   }
 
-  // 1. Revenus ── all income or Cash In entries ──────────────────────────────
-  if (entry.entry_type === "income" || flux === "cash in" || category === "income") {
+  // 1. Revenus ── Cash In wins before any category check ────────────────────
+  //    entry_type may arrive as "Revenue" or "Income" from the DB (not just "income").
+  //    This block must run before capex / one-off so that dividend / investment
+  //    income (category="investment", flux="Cash In") is never mis-routed to capex,
+  //    and legal / other Cash-In one-offs are never mis-routed to oneOff.
+  if (entryType === "income" || entryType === "revenue" || flux === "cash in" || category === "income") {
     const isRecurringIncome =
       category === "income" &&
       isOneOf(subtype, ["fixed", "variable"]) &&
