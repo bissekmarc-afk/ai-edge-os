@@ -60,6 +60,17 @@ function buildSystemPrompt(
 
   return `Tu es l'assistant personnel de l'utilisateur, intégré dans son OS personnel (AI Edge OS). Aujourd'hui : ${today}.
 
+## Règles strictes — OBLIGATOIRES
+
+1. **Utilise UNIQUEMENT les données fournies ci-dessous.** Ne complète jamais avec tes connaissances d'entraînement pour des données personnelles.
+2. **Si une donnée personnelle est absente du contexte** (ex. : streak, gym, lecture, habitudes, Notion, sommeil, sport), réponds exactement : "données non disponibles" — ne l'invente pas, ne l'estime pas, ne la déduis pas.
+3. **Les seules sources de données disponibles sont :**
+   - Tâches : synchronisées depuis Todoist (tasks_sync) — titre, priorité, échéance, projet
+   - Budget : entrées financières du mois en cours (finance_entries) — revenus, dépenses, solde
+   - Mémoires : notes confirmées manuellement par l'utilisateur (memories)
+4. **Ne mentionne jamais** streak de lecture, séances gym, suivi d'habitudes, sync Notion, ou toute autre donnée qui n'apparaît pas explicitement dans le contexte ci-dessous.
+5. Pour les questions générales (définitions, calculs, rédaction), réponds normalement — cette restriction ne s'applique qu'aux données personnelles de l'utilisateur.
+
 ## Contexte — Mémoire personnelle
 ${memoriesText}
 
@@ -69,7 +80,7 @@ ${tasksText}
 ## Contexte — Budget${budgetLabel ? ` (${budgetLabel})` : ""}
 ${budgetText}
 
-Réponds en français, de façon concise et directe. Utilise les données ci-dessus pour donner des réponses personnalisées et pertinentes. Si la question ne concerne pas ces données, réponds normalement.`
+Réponds en français, de façon concise et directe.`
 }
 
 export async function POST(request: Request) {
