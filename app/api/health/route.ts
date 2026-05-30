@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 
 export async function GET() {
+  if (process.env.NODE_ENV !== "development") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
   const peek = (v: string | undefined) =>
     v ? `${v.slice(0, 5)}… (${v.length} chars)` : "MISSING"
 

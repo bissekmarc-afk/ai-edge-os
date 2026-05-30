@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
+import { getSupabaseUser } from "@/lib/supabase/server"
 import { getTasksFromSupabase } from "@/lib/queries/tasks"
 import { getBudgetSummaryFromSupabase } from "@/lib/queries/finance"
 import { getConfirmedMemories } from "@/lib/queries/memory"
@@ -72,6 +73,12 @@ Réponds en français, de façon concise et directe. Utilise les données ci-des
 }
 
 export async function POST(request: Request) {
+  // ── Auth — must precede any external API call ──────────────────────────────
+  const user = await getSupabaseUser()
+  if (!user) {
+    return Response.json({ error: "Non authentifié" }, { status: 401 })
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey || apiKey === "your_anthropic_api_key_here") {
     return Response.json({ error: "ANTHROPIC_API_KEY non configurée" }, { status: 503 })

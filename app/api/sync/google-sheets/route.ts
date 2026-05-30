@@ -104,8 +104,8 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     )
   }
 
-  // ── 2. Supabase auth ───────────────────────────────────────────────────────
-  console.log("[sync/google-sheets] STEP 2 auth — reading session from cookies…")
+  // ── 2. Supabase auth — getUser() verifies JWT server-side ────────────────
+  console.log("[sync/google-sheets] STEP 2 auth — verifying user with Supabase…")
   const supabase = createServerClient(supabaseUrl, supabaseKey, {
     cookies: {
       getAll() { return request.cookies.getAll() },
@@ -113,20 +113,20 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     },
   })
 
-  const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
   console.log(
-    `[sync/google-sheets]          session=${session ? `uid=${session.user.id}` : "null"}` +
-    ` sessionError=${sessionError?.message ?? "none"}`,
+    `[sync/google-sheets]          user=${user ? `uid=${user.id}` : "null"}` +
+    ` userError=${userError?.message ?? "none"}`,
   )
 
-  if (sessionError || !session) {
+  if (userError || !user) {
     return NextResponse.json(
-      { error: "No active session", detail: sessionError?.message ?? "cookie not found" },
+      { error: "Non authentifié", detail: userError?.message ?? "session invalide ou expirée" },
       { status: 401 },
     )
   }
 
-  const userId = session.user.id
+  const userId = user.id
 
   // ── 3. Google access token ─────────────────────────────────────────────────
   console.log("[sync/google-sheets] STEP 3 google token — calling getGoogleAccessToken…")

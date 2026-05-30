@@ -4,10 +4,10 @@
  * Deletes all finance_entries rows that belong to the authenticated user.
  * Wealth snapshots are left untouched (re-created by the next sync).
  *
- * Auth: reads the session from request cookies via getSession() — avoids the
- * network round-trip that getUser() does, which can fail in Route Handlers
- * called from client-side fetch (AuthSessionMissingError).
- * The actual data access is still protected by RLS (auth.uid() = user_id).
+ * Auth: uses getUser() which verifies the JWT with the Supabase server —
+ * required for destructive operations so a replayed or forged cookie cannot
+ * bypass the check.  RLS (auth.uid() = user_id) adds a second layer of
+ * protection on every DB operation.
  *
  * Cookie handling: uses request.cookies from NextRequest — the canonical
  * pattern for @supabase/ssr in Route Handlers (vs cookies() from next/headers
@@ -46,21 +46,21 @@ export async function POST(request: NextRequest) {
     }
   )
 
-  // getSession() reads directly from the cookie without a network call.
-  // Sufficient here because RLS enforces user_id = auth.uid() at DB level.
+  // getUser() verifies the JWT with the Supabase server — required for
+  // destructive operations so a replayed cookie cannot bypass auth.
   const {
-    data: { session },
-    error: sessionError,
-  } = await supabase.auth.getSession()
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
 
-  if (sessionError || !session) {
+  if (userError || !user) {
     return NextResponse.json(
-      { error: "No active session", detail: sessionError?.message ?? "session cookie not found" },
+      { error: "Non authentifié", detail: userError?.message ?? "session invalide ou expirée" },
       { status: 401 }
     )
   }
 
-  const userId = session.user.id
+  const userId = user.id
 
   // Sources supprimées par le reset — manual_saisie est intentionnellement exclu.
   const DELETABLE_SOURCES = ["google_sheets", "csv_import"]
