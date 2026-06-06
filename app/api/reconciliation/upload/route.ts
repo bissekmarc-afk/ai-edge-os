@@ -16,8 +16,11 @@ import { matchTransactions } from "@/lib/csv/matcher"
 import type { MatchCandidate } from "@/lib/csv/matcher"
 
 export async function POST(request: NextRequest) {
+  console.log("[reconciliation/upload] ── POST reçu ──")
+
   // ── Auth ──────────────────────────────────────────────────────────────────
   const user = await getSupabaseUser()
+  console.log(`[reconciliation/upload] auth: user=${user ? user.id.slice(0, 8) + "…" : "null (401)"}`)
   if (!user) {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 })
   }
@@ -97,27 +100,30 @@ export async function POST(request: NextRequest) {
 
     const { data: entries, error: fetchError } = await supabase
       .from("finance_entries")
-      .select("id, date, label, amount, source, sync_status")
+      .select("id, date, label, amount, entry_type, source, sync_status")
       .gte("date",       rangeMin)
       .lte("date",       rangeMax)
       .eq("scenario",    "actual")
       .eq("is_subtotal", false)
       .eq("is_non_cash", false)
-      // Exclure les "deleted" tout en conservant les lignes où sync_status est null.
-      // PostgREST: .neq() exclut les NULL → utiliser .or() pour inclure les nulls.
       .or("sync_status.neq.deleted,sync_status.is.null")
 
     if (fetchError) {
       console.error("[reconciliation/upload] finance_entries fetch error:", fetchError.message)
-      // Non fatal — on continue sans candidates
     } else {
-      candidates = (entries ?? []).map(e => ({
-        id:     e.id as string,
-        date:   e.date as string,
-        label:  e.label as string,
-        amount: Math.abs(Number(e.amount)),
-        source: e.source as string,
-      }))
+      candidates = (entries ?? []).map(e => {
+        const absAmount = Math.abs(Number(e.amount))
+        const entryType = (e.entry_type ?? "expense") as "income" | "expense"
+        return {
+          id:           e.id as string,
+          date:         e.date as string,
+          label:        e.label as string,
+          amount:       absAmount,
+          signedAmount: entryType === "income" ? absAmount : -absAmount,
+          entry_type:   entryType,
+          source:       e.source as string,
+        }
+      })
 
       console.log(
         `[reconciliation/upload] finance_entries found: ${candidates.length}` +
