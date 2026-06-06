@@ -152,32 +152,35 @@ export function matchTransactions(
       }
     }
 
-    // 2. Scorer par similarité libellé + proximité de date
+    // 2. Scorer par similarité libellé + proximité de date.
+    //
+    //    Note contexte : les libellés bancaires (ex: "ENVOI WERO AMAR A", "VIR SEPA")
+    //    et les libellés finance_entries (ex: "Legal", "Loyer", "Courses") sont dans
+    //    des formats radicalement différents → Jaccard ≈ 0 est normal.
+    //    On NE gate PAS sur le label : si amount + mois correspondent, c'est un match.
+    //    Le label sert uniquement de tiebreaker quand plusieurs candidats existent.
+    //
+    //    dateScore : toujours positif.
+    //      ±3 jours  → score entre 0.25 et 1.0 (formule stricte)
+    //      même mois → score fixe 0.1 (fallback SG Sheets → date = 1er du mois)
     const scored = eligible.map(c => {
+      const dayD       = daysDiff(txn.date, c.date)
+      const dateScore  = dayD <= DATE_TOLERANCE_DAYS
+        ? (1 - dayD / (DATE_TOLERANCE_DAYS + 1))   // 0.25 → 1.0
+        : 0.1                                        // sameMonth fallback : bonus fixe
       const labelScore = jaccardSimilarity(txnTokens, c.tokens)
-      const dateScore  = 1 - daysDiff(txn.date, c.date) / (DATE_TOLERANCE_DAYS + 1)
-      return { candidate: c, score: labelScore * 0.75 + dateScore * 0.25 }
+      return { candidate: c, score: labelScore * 0.4 + dateScore * 0.6 }
     }).sort((a, b) => b.score - a.score)
 
     const best = scored[0]
 
-    if (best.score >= LABEL_THRESHOLD) {
-      return {
-        transaction:    txn,
-        matchStatus:    "matched",
-        matchedEntryId: best.candidate.id,
-        matchScore:     Math.round(best.score * 100) / 100,
-        matchedEntry:   best.candidate,
-      }
-    }
-
-    // Candidats trouvés mais score insuffisant
+    // Toujours matcher si on a au moins un candidat éligible (pas de seuil label).
     return {
       transaction:    txn,
-      matchStatus:    "unmatched",
-      matchedEntryId: null,
+      matchStatus:    "matched",
+      matchedEntryId: best.candidate.id,
       matchScore:     Math.round(best.score * 100) / 100,
-      matchedEntry:   null,
+      matchedEntry:   best.candidate,
     }
   })
 }

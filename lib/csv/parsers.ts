@@ -249,20 +249,39 @@ function parseCompte(text: string): ParseResult {
 export function parseCSV(buffer: ArrayBuffer, filename: string): ParseResult {
   const filenameLow = filename.toLowerCase()
 
-  // Heuristique 1 : nom de fichier
+  // ── Détection prioritaire par nom de fichier ──────────────────────────────
+  //
+  // Carte     : carte_XXXX_*.csv  → commence toujours par "carte_"
+  // Compte    : XXXXXXXXX_*.csv   → commence par le numéro de compte (chiffres)
+  //
+  // On n'utilise PAS "includes('sous')" qui est trop permissif (SG peut inclure
+  // ce mot dans les headers du compte courant selon la version d'export).
+
   if (filenameLow.startsWith("carte_")) {
-    const text = new TextDecoder("utf-8").decode(buffer)
-    return parseCarte(text)
+    console.log("[parseCSV] type=carte (filename prefix)")
+    return parseCarte(new TextDecoder("utf-8").decode(buffer))
   }
 
-  // Heuristique 2 : lire les headers en UTF-8 pour détecter le format
-  const utf8Text    = new TextDecoder("utf-8", { fatal: false }).decode(buffer)
-  const firstLines  = utf8Text.split(/\r?\n/).slice(0, 3).join("\n").toLowerCase()
-  if (firstLines.includes("categorie") || firstLines.includes("sous")) {
+  if (/^\d/.test(filenameLow)) {
+    console.log("[parseCSV] type=compte (filename starts with digit → account number)")
+    return parseCompte(new TextDecoder("iso-8859-1").decode(buffer))
+  }
+
+  // ── Fallback : détection par headers ─────────────────────────────────────
+  // Uniquement si le nom de fichier ne permet pas de trancher.
+  // Critère strict : "sous categorie" ou ("categorie" ET "comptabilisation").
+
+  const utf8Text   = new TextDecoder("utf-8", { fatal: false }).decode(buffer)
+  const firstLines = utf8Text.split(/\r?\n/).slice(0, 3).join("\n").toLowerCase()
+
+  if (
+    firstLines.includes("sous categorie") ||
+    (firstLines.includes("categorie") && firstLines.includes("comptabilisation"))
+  ) {
+    console.log("[parseCSV] type=carte (header detection fallback)")
     return parseCarte(utf8Text)
   }
 
-  // Fallback : Compte courant (latin-1)
-  const latin1Text = new TextDecoder("iso-8859-1").decode(buffer)
-  return parseCompte(latin1Text)
+  console.log("[parseCSV] type=compte (header detection fallback)")
+  return parseCompte(new TextDecoder("iso-8859-1").decode(buffer))
 }
