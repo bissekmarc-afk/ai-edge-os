@@ -93,15 +93,19 @@ export async function POST(request: NextRequest) {
     const rangeMin = minDt.toISOString().slice(0, 10)
     const rangeMax = maxDt.toISOString().slice(0, 10)
 
+    console.log(`[reconciliation/upload] fetching finance_entries date range: ${rangeMin} → ${rangeMax}`)
+
     const { data: entries, error: fetchError } = await supabase
       .from("finance_entries")
-      .select("id, date, label, amount, source")
-      .gte("date",     rangeMin)
-      .lte("date",     rangeMax)
-      .eq("scenario",  "actual")
+      .select("id, date, label, amount, source, sync_status")
+      .gte("date",       rangeMin)
+      .lte("date",       rangeMax)
+      .eq("scenario",    "actual")
       .eq("is_subtotal", false)
       .eq("is_non_cash", false)
-      .neq("sync_status", "deleted")
+      // Exclure les "deleted" tout en conservant les lignes où sync_status est null.
+      // PostgREST: .neq() exclut les NULL → utiliser .or() pour inclure les nulls.
+      .or("sync_status.neq.deleted,sync_status.is.null")
 
     if (fetchError) {
       console.error("[reconciliation/upload] finance_entries fetch error:", fetchError.message)
@@ -114,6 +118,18 @@ export async function POST(request: NextRequest) {
         amount: Math.abs(Number(e.amount)),
         source: e.source as string,
       }))
+
+      console.log(
+        `[reconciliation/upload] finance_entries found: ${candidates.length}` +
+        (candidates.length > 0
+          ? ` | first: date="${candidates[0].date}" amount=${candidates[0].amount}` +
+            ` label="${candidates[0].label.slice(0, 40)}"`
+          : " ← ⚠️ plage vide ou filtres trop restrictifs"),
+      )
+      console.log(
+        `[reconciliation/upload] first bank_txn: date="${activeTxns[0]?.date}"` +
+        ` amount=${activeTxns[0]?.amount} label="${activeTxns[0]?.label.slice(0, 40)}"`,
+      )
     }
   }
 

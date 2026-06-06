@@ -32,6 +32,15 @@ function daysDiff(a: string, b: string): number {
   return Math.floor(ms / 86_400_000)
 }
 
+/**
+ * Deux dates sont dans le même mois calendaire (YYYY-MM).
+ * Utilisé comme fallback pour les finance_entries datées au 1er du mois
+ * (export Google Sheets : toutes les entrées d'un mois → date = YYYY-MM-01).
+ */
+function sameMonth(a: string, b: string): boolean {
+  return a.slice(0, 7) === b.slice(0, 7)
+}
+
 /** Tokenise et normalise un libellé en set de mots (≥ 3 chars) */
 function tokenize(s: string): Set<string> {
   const normalized = s
@@ -67,11 +76,31 @@ export function matchTransactions(
   transactions: ParsedTransaction[],
   candidates:   MatchCandidate[],
 ): MatchResult[] {
+  // ── Debug : inspecter le premier exemple de chaque côté ──────────────────
+  const firstActive = transactions.find(t => !t.excluded)
+  if (firstActive) {
+    console.log(
+      `[matcher] first bank_txn  : date="${firstActive.date}" amount=${firstActive.amount}` +
+      ` label="${firstActive.label.slice(0, 50)}"`,
+    )
+  }
+  if (candidates.length > 0) {
+    const c0 = candidates[0]
+    console.log(
+      `[matcher] first fe_candidate: date="${c0.date}" amount=${c0.amount}` +
+      ` label="${c0.label.slice(0, 50)}"`,
+    )
+  } else {
+    console.warn("[matcher] ⚠️  0 finance_entries candidates → aucun rapprochement possible")
+  }
+
   // Pré-calculer les tokens des candidats une seule fois
   const candidateTokens = candidates.map(c => ({
     ...c,
     tokens: tokenize(c.label),
   }))
+
+  let debuggedFirst = false  // Logger un seul exemple de filtre dans les logs
 
   return transactions.map(txn => {
     // Transaction exclue → pas de matching
@@ -88,12 +117,30 @@ export function matchTransactions(
     const txnAmount = Math.abs(txn.amount)
     const txnTokens = tokenize(txn.label)
 
-    // 1. Filtrer par montant ±AMOUNT_TOLERANCE et date ±DATE_TOLERANCE_DAYS
+    // 1. Filtrer par montant ±AMOUNT_TOLERANCE et date (±DATE_TOLERANCE_DAYS OU même mois).
+    //
+    //    Fallback "même mois" nécessaire car les finance_entries issues de Google Sheets
+    //    sont toutes datées au 1er du mois (ex: 2026-05-01), tandis que les transactions
+    //    bancaires ont des dates réelles (ex: 2026-05-15) → diff = 14 jours > 3 jours.
     const eligible = candidateTokens.filter(c => {
       const amountOk = Math.abs(c.amount - txnAmount) <= AMOUNT_TOLERANCE_EUR
       const dateOk   = daysDiff(txn.date, c.date) <= DATE_TOLERANCE_DAYS
+                    || sameMonth(txn.date, c.date)
       return amountOk && dateOk
     })
+
+    // Debug : logguer le premier cas pour diagnostiquer les filtres
+    if (!debuggedFirst && !txn.excluded) {
+      debuggedFirst = true
+      const byAmount = candidateTokens.filter(c => Math.abs(c.amount - txnAmount) <= AMOUNT_TOLERANCE_EUR)
+      const byDate   = candidateTokens.filter(c =>
+        daysDiff(txn.date, c.date) <= DATE_TOLERANCE_DAYS || sameMonth(txn.date, c.date)
+      )
+      console.log(
+        `[matcher] debug txn "${txn.label.slice(0, 40)}" amount=${txnAmount} date=${txn.date}` +
+        ` | byAmount=${byAmount.length} byDate=${byDate.length} eligible=${eligible.length}`,
+      )
+    }
 
     if (eligible.length === 0) {
       return {
