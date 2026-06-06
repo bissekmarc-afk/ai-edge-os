@@ -14,6 +14,7 @@ import {
   PanelLeftOpen,
   LogOut,
   Loader,
+  GitCompare,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { SidebarNavItem } from "@/components/layout/sidebar-nav-item"
@@ -30,8 +31,9 @@ const NAV_ITEMS = [
   { href: "/memory", label: "Mémoire", icon: <Brain className="size-4" /> },
   { href: "/finance", label: "Finance",  icon: <DollarSign className="size-4" /> },
   { href: "/saisie", label: "Saisie",   icon: <PenLine    className="size-4" /> },
-  { href: "/life",   label: "Life Blocks", icon: <LayoutGrid className="size-4" /> },
-  { href: "/settings", label: "Réglages", icon: <Settings className="size-4" /> },
+  { href: "/life",            label: "Life Blocks",   icon: <LayoutGrid  className="size-4" /> },
+  { href: "/reconciliation", label: "Réconciliation", icon: <GitCompare  className="size-4" /> },
+  { href: "/settings",       label: "Réglages",       icon: <Settings    className="size-4" /> },
 ] as const
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
