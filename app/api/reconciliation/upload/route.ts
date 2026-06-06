@@ -4,16 +4,14 @@
 // 2. Parse FormData → buffer
 // 3. Détecte type + parse CSV
 // 4. INSERT csv_imports
-// 5. Fetch finance_entries (plage de dates des transactions)
-// 6. Match en mémoire
-// 7. INSERT bank_transactions (avec match_status pré-calculé)
-// 8. Retourne résumé + transactions pour l'UI
+// 5. INSERT bank_transactions (sans matching)
+// 6. Grouper par catégorie bancaire → BankCategorySummary[]
+// 7. Retourner résumé catégories + période + totaux
 
 import { NextRequest, NextResponse } from "next/server"
 import { getSupabaseUser, createSupabaseServerClient } from "@/lib/supabase/server"
 import { parseCSV } from "@/lib/csv/parsers"
-import { matchTransactions } from "@/lib/csv/matcher"
-import type { MatchCandidate } from "@/lib/csv/matcher"
+import { summarizeByBankCategory, computePeriod } from "@/lib/csv/summarize"
 
 export async function POST(request: NextRequest) {
   console.log("[reconciliation/upload] ── POST reçu ──")
@@ -51,8 +49,7 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  const activeTxns = parseResult.transactions.filter(t => !t.excluded)
-  if (activeTxns.length === 0 && parseResult.transactions.length === 0) {
+  if (parseResult.transactions.length === 0) {
     return NextResponse.json({ error: "Aucune transaction parsée" }, { status: 422 })
   }
 
@@ -82,77 +79,17 @@ export async function POST(request: NextRequest) {
 
   const importId = importRow.id
 
-  // ── Fetch finance_entries pour la plage de dates ──────────────────────────
-  let candidates: MatchCandidate[] = []
-
-  if (activeTxns.length > 0) {
-    const dates    = activeTxns.map(t => t.date).sort()
-    const minDate  = dates[0]
-    const maxDate  = dates[dates.length - 1]
-
-    // Étendre la plage de ±3 jours pour le matching
-    const minDt  = new Date(minDate); minDt.setDate(minDt.getDate() - 3)
-    const maxDt  = new Date(maxDate); maxDt.setDate(maxDt.getDate() + 3)
-    const rangeMin = minDt.toISOString().slice(0, 10)
-    const rangeMax = maxDt.toISOString().slice(0, 10)
-
-    console.log(`[reconciliation/upload] fetching finance_entries date range: ${rangeMin} → ${rangeMax}`)
-
-    const { data: entries, error: fetchError } = await supabase
-      .from("finance_entries")
-      .select("id, date, label, amount, entry_type, source, sync_status")
-      .gte("date",       rangeMin)
-      .lte("date",       rangeMax)
-      .eq("scenario",    "actual")
-      .eq("is_subtotal", false)
-      .eq("is_non_cash", false)
-      .or("sync_status.neq.deleted,sync_status.is.null")
-
-    if (fetchError) {
-      console.error("[reconciliation/upload] finance_entries fetch error:", fetchError.message)
-    } else {
-      candidates = (entries ?? []).map(e => {
-        const absAmount = Math.abs(Number(e.amount))
-        const entryType = (e.entry_type ?? "expense") as "income" | "expense"
-        return {
-          id:           e.id as string,
-          date:         e.date as string,
-          label:        e.label as string,
-          amount:       absAmount,
-          signedAmount: entryType === "income" ? absAmount : -absAmount,
-          entry_type:   entryType,
-          source:       e.source as string,
-        }
-      })
-
-      console.log(
-        `[reconciliation/upload] finance_entries found: ${candidates.length}` +
-        (candidates.length > 0
-          ? ` | first: date="${candidates[0].date}" amount=${candidates[0].amount}` +
-            ` label="${candidates[0].label.slice(0, 40)}"`
-          : " ← ⚠️ plage vide ou filtres trop restrictifs"),
-      )
-      console.log(
-        `[reconciliation/upload] first bank_txn: date="${activeTxns[0]?.date}"` +
-        ` amount=${activeTxns[0]?.amount} label="${activeTxns[0]?.label.slice(0, 40)}"`,
-      )
-    }
-  }
-
-  // ── Matching en mémoire ───────────────────────────────────────────────────
-  const matchResults = matchTransactions(parseResult.transactions, candidates)
-
-  // ── INSERT bank_transactions ──────────────────────────────────────────────
-  const rows = matchResults.map(r => ({
+  // ── INSERT bank_transactions (sans matching) ───────────────────────────────
+  const rows = parseResult.transactions.map(t => ({
     user_id:          user.id,
     import_id:        importId,
-    date:             r.transaction.date,
-    label:            r.transaction.label,
-    amount:           r.transaction.amount,
-    category_bank:    r.transaction.categoryBank,
-    type_operation:   r.transaction.typeOperation,
-    matched_entry_id: r.matchedEntryId,
-    match_status:     r.matchStatus,
+    date:             t.date,
+    label:            t.label,
+    amount:           t.amount,
+    category_bank:    t.categoryBank,
+    type_operation:   t.typeOperation,
+    matched_entry_id: null,
+    match_status:     t.excluded ? "excluded" : "unmatched",
   }))
 
   const BATCH = 200
@@ -167,48 +104,25 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Résumé ────────────────────────────────────────────────────────────────
-  const summary = {
-    total:      matchResults.length,
-    matched:    matchResults.filter(r => r.matchStatus === "matched").length,
-    unmatched:  matchResults.filter(r => r.matchStatus === "unmatched").length,
-    excluded:   matchResults.filter(r => r.matchStatus === "excluded").length,
-  }
+  // ── Agrégation par catégorie bancaire ─────────────────────────────────────
+  const summary    = summarizeByBankCategory(parseResult.transactions)
+  const period     = computePeriod(parseResult.transactions)
+  const debits     = parseResult.transactions.filter(t => !t.excluded && t.amount < 0)
+  const totalSpent = Math.round(debits.reduce((s, t) => s + Math.abs(t.amount), 0) * 100) / 100
 
   console.log(
     `[reconciliation/upload] type=${parseResult.type} rows=${rows.length}` +
-    ` matched=${summary.matched} unmatched=${summary.unmatched} excluded=${summary.excluded}`,
+    ` débits=${debits.length} total=${totalSpent}€ catégories=${summary.length} période="${period}"`,
   )
-
-  // Transactions à renvoyer à l'UI (avec détails de l'entrée rapprochée)
-  const transactionsForUI = matchResults.map(r => ({
-    date:           r.transaction.date,
-    label:          r.transaction.label,
-    amount:         r.transaction.amount,
-    categoryBank:   r.transaction.categoryBank,
-    subCategory:    r.transaction.subCategory,
-    typeOperation:  r.transaction.typeOperation,
-    excluded:       r.transaction.excluded,
-    excludeReason:  r.transaction.excludeReason,
-    matchStatus:    r.matchStatus,
-    matchScore:     r.matchScore,
-    matchedEntry:   r.matchedEntry
-      ? {
-          id:     r.matchedEntry.id,
-          date:   r.matchedEntry.date,
-          label:  r.matchedEntry.label,
-          amount: r.matchedEntry.amount,
-          source: r.matchedEntry.source,
-        }
-      : null,
-  }))
 
   return NextResponse.json({
     importId,
-    type:         parseResult.type,
+    type:              parseResult.type,
     filename,
+    totalSpent,
+    totalTransactions: debits.length,
+    period,
     summary,
-    transactions: transactionsForUI,
-    parseErrors:  parseResult.errors,
+    parseErrors: parseResult.errors,
   })
 }

@@ -1,8 +1,13 @@
 // ── lib/csv/matcher.ts ────────────────────────────────────────────────────────
 //
-// Algorithme de rapprochement amount-first, sans similarité de libellé.
+// Legacy automatic matching engine.
+// Kept for reference but intentionally not used in /reconciliation.
 //
-// Stratégies (par priorité) :
+// Le module /reconciliation utilise désormais lib/csv/summarize.ts pour
+// afficher les dépenses réelles groupées par catégorie bancaire.
+// Ce fichier n'est plus appelé dans le flow principal.
+//
+// Stratégies d'origine (pour référence) :
 //   1. exact_signed  — même mois + montant signé exact (centimes)
 //   2. absolute      — même mois + abs(montant) exact  (fallback sign-agnostic)
 //   3. no_match      — aucun candidat

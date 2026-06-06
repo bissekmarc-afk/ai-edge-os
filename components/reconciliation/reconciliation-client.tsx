@@ -1,40 +1,27 @@
 "use client"
 
 import { useRef, useState, useCallback, useEffect } from "react"
-import {
-  Upload, CheckCircle2, AlertCircle, MinusCircle,
-  Loader2, RotateCcw, Check, ChevronDown, ChevronRight,
-} from "lucide-react"
+import { Upload, Loader2, RotateCcw, Check, ChevronDown, ChevronRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import type { BankCategorySummary } from "@/lib/csv/summarize"
 
-// ─── Types partagés ──────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-interface MatchedEntry {
-  id:     string
-  date:   string
-  label:  string
-  amount: number
-  source: string
+interface ImportData {
+  importId:          string
+  type:              "carte" | "compte"
+  filename:          string
+  totalSpent:        number
+  totalTransactions: number
+  period:            string
+  summary:           BankCategorySummary[]
+  parseErrors:       string[]
 }
 
-interface TransactionRow {
-  date:          string
-  label:         string
-  amount:        number
-  categoryBank:  string | null
-  subCategory:   string | null
-  typeOperation: string | null
-  excluded:      boolean
-  excludeReason: string | null
-  matchStatus:   "matched" | "unmatched" | "excluded"
-  matchScore:    number
-  matchedEntry:  MatchedEntry | null
-}
-
-interface ImportStats {
+interface HistoryStats {
   total:       number
   matched:     number
   unmatched:   number
@@ -42,16 +29,6 @@ interface ImportStats {
   totalAmount: number
 }
 
-interface ImportResult {
-  importId:     string
-  type:         "carte" | "compte"
-  filename:     string
-  summary:      ImportStats
-  transactions: TransactionRow[]
-  parseErrors:  string[]
-}
-
-// Pour l'historique
 interface HistoryImport {
   id:         string
   filename:   string
@@ -59,10 +36,9 @@ interface HistoryImport {
   uploadedAt: string
   rowCount:   number
   status:     "parsed" | "confirmed" | "error"
-  stats:      ImportStats | null
+  stats:      HistoryStats | null
 }
 
-// Transactions DB (depuis /api/reconciliation/import/[id])
 interface DbTransactionRow {
   id:            string
   date:          string
@@ -73,61 +49,29 @@ interface DbTransactionRow {
   matchStatus:   "matched" | "unmatched" | "excluded"
 }
 
-// ─── Formatters ──────────────────────────────────────────────────────────────
+// ─── Formatters ───────────────────────────────────────────────────────────────
 
 const formatEur = (n: number) =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", minimumFractionDigits: 2 }).format(n)
-
-const formatDate = (iso: string) =>
-  new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(iso))
+  new Intl.NumberFormat("fr-FR", {
+    style:                 "currency",
+    currency:              "EUR",
+    minimumFractionDigits: 2,
+  }).format(n)
 
 const formatDateTime = (iso: string) =>
-  new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso))
+  new Intl.DateTimeFormat("fr-FR", {
+    day:    "2-digit",
+    month:  "short",
+    hour:   "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso))
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
-
-function StatusBadge({ status, reason }: { status: "matched" | "unmatched" | "excluded"; reason?: string | null }) {
-  if (status === "matched") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-[var(--success)]/10 px-2 py-0.5 text-xs font-medium text-[var(--success)]">
-        <CheckCircle2 className="size-3" /> Rapproché
-      </span>
-    )
-  }
-  if (status === "excluded") {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground" title={reason ?? undefined}>
-        <MinusCircle className="size-3" /> Exclu
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--warning)]/10 px-2 py-0.5 text-xs font-medium text-[var(--warning)]">
-      <AlertCircle className="size-3" /> Non rapproché
-    </span>
-  )
-}
-
-// ─── Stats inline ─────────────────────────────────────────────────────────────
-
-function StatsRow({ stats, type, showAmount = false }: { stats: ImportStats; type: "carte" | "compte"; showAmount?: boolean }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-      <Badge variant="outline" className="text-[10px] font-normal">
-        {type === "carte" ? "Carte" : "Compte"}
-      </Badge>
-      <span className="text-xs text-foreground tabular-nums font-medium">{stats.total} lignes</span>
-      <span className="text-xs text-[var(--success)] tabular-nums">{stats.matched} rapprochés</span>
-      <span className="text-xs text-[var(--warning)] tabular-nums">{stats.unmatched} non rapprochés</span>
-      <span className="text-xs text-muted-foreground tabular-nums">{stats.excluded} exclus</span>
-      {showAmount && stats.totalAmount > 0 && (
-        <span className="text-xs text-foreground tabular-nums font-medium ml-auto">
-          {formatEur(stats.totalAmount)} traités
-        </span>
-      )}
-    </div>
-  )
-}
+const formatDate = (iso: string) =>
+  new Intl.DateTimeFormat("fr-FR", {
+    day:   "2-digit",
+    month: "2-digit",
+    year:  "numeric",
+  }).format(new Date(iso))
 
 // ─── Upload Zone ──────────────────────────────────────────────────────────────
 
@@ -139,7 +83,7 @@ function UploadZone({ onFile }: { onFile: (f: File) => void }) {
     e.preventDefault()
     setDragging(false)
     const file = e.dataTransfer.files[0]
-    if (file?.name.endsWith(".csv")) onFile(file)
+    if (file?.name.toLowerCase().endsWith(".csv")) onFile(file)
   }, [onFile])
 
   return (
@@ -162,171 +106,143 @@ function UploadZone({ onFile }: { onFile: (f: File) => void }) {
       <div className="text-center">
         <p className="text-sm font-medium text-foreground">Déposez un fichier CSV ou cliquez</p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Carte (<code>carte_XXXX_*.csv</code>) ou Compte courant
+          Relevé Carte (<code>carte_XXXX_*.csv</code>) ou Compte courant
         </p>
       </div>
-      <input ref={inputRef} type="file" accept=".csv" className="hidden"
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv"
+        className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = "" }}
       />
     </div>
   )
 }
 
-// ─── Transactions table (réview après upload) ─────────────────────────────────
+// ─── Tableau catégories ───────────────────────────────────────────────────────
 
-function TransactionsTable({ transactions }: { transactions: TransactionRow[] }) {
-  const [filter, setFilter] = useState<"all" | "matched" | "unmatched" | "excluded">("all")
-  const visible = transactions.filter(t => filter === "all" || t.matchStatus === filter)
+function CategoryTable({ summary }: { summary: BankCategorySummary[] }) {
+  if (summary.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-muted-foreground">
+        Aucune dépense détectée dans ce relevé.
+      </p>
+    )
+  }
 
   return (
-    <div className="space-y-3">
-      <div className="flex gap-2 flex-wrap">
-        {(["all", "matched", "unmatched", "excluded"] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={cn("rounded-md px-3 py-1 text-xs font-medium transition-colors",
-              filter === f ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:bg-muted/80"
-            )}>
-            {f === "all" ? "Tout" : f === "matched" ? "Rapprochés" : f === "unmatched" ? "Non rapprochés" : "Exclus"}
-          </button>
-        ))}
-        <span className="ml-auto text-xs text-muted-foreground self-center">{visible.length} ligne{visible.length !== 1 ? "s" : ""}</span>
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[680px] text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[88px]">Date</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Libellé</th>
-              <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground w-[96px]">Montant</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[110px]">Catégorie</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground w-[108px]">Statut</th>
-              <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground">Entrée correspondante</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {visible.map((t, i) => (
-              <tr key={i} className={cn("transition-colors hover:bg-muted/20", t.matchStatus === "excluded" && "opacity-50")}>
-                <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">{formatDate(t.date)}</td>
-                <td className="px-3 py-2 max-w-[220px]">
-                  <p className="truncate font-medium text-foreground" title={t.label}>{t.label}</p>
-                  {t.typeOperation && t.typeOperation !== "Carte bancaire" && (
-                    <p className="text-[10px] text-muted-foreground">{t.typeOperation}</p>
-                  )}
-                  {t.excludeReason && <p className="text-[10px] text-muted-foreground italic">{t.excludeReason}</p>}
-                </td>
-                <td className={cn("px-3 py-2 text-right font-mono text-xs tabular-nums whitespace-nowrap",
-                  t.excluded ? "text-muted-foreground" : t.amount < 0 ? "text-[var(--danger)]" : "text-[var(--success)]")}>
-                  {t.excluded ? "—" : formatEur(t.amount)}
-                </td>
-                <td className="px-3 py-2 text-xs text-muted-foreground max-w-[110px]">
-                  <span className="truncate block" title={[t.categoryBank, t.subCategory].filter(Boolean).join(" / ")}>
-                    {t.categoryBank ?? "—"}
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full min-w-[500px] text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/40">
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">
+              Catégorie banque
+            </th>
+            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground w-[130px]">
+              Total dépensé
+            </th>
+            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground w-[110px]">
+              Transactions
+            </th>
+            <th className="px-4 py-2.5 text-right text-xs font-medium text-muted-foreground w-[90px]">
+              % du total
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {summary.map(row => (
+            <tr key={row.category} className="hover:bg-muted/20 transition-colors">
+              <td className="px-4 py-2.5 font-medium text-foreground">{row.category}</td>
+              <td className="px-4 py-2.5 text-right font-mono text-sm tabular-nums text-[var(--danger)]">
+                {formatEur(row.totalSpent)}
+              </td>
+              <td className="px-4 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
+                {row.transactionCount}
+              </td>
+              <td className="px-4 py-2.5 text-right">
+                <div className="flex items-center justify-end gap-2">
+                  <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-[var(--ai-accent)]"
+                      style={{ width: `${Math.min(row.shareOfTotalPct, 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+                    {row.shareOfTotalPct.toFixed(1)}%
                   </span>
-                </td>
-                <td className="px-3 py-2"><StatusBadge status={t.matchStatus} reason={t.excludeReason} /></td>
-                <td className="px-3 py-2 text-xs text-muted-foreground max-w-[180px]">
-                  {t.matchedEntry ? (
-                    <div>
-                      <p className="truncate text-foreground" title={t.matchedEntry.label}>{t.matchedEntry.label}</p>
-                      <p className="text-[10px]">
-                        {formatDate(t.matchedEntry.date)} · {formatEur(t.matchedEntry.amount)}
-                        {t.matchScore > 0 && <span className="ml-1 text-muted-foreground/60">({Math.round(t.matchScore * 100)}%)</span>}
-                      </p>
-                    </div>
-                  ) : <span className="text-muted-foreground/50">—</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {visible.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">Aucune transaction pour ce filtre.</p>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ─── Table transactions DB (depuis historique) ────────────────────────────────
-
-function DbTransactionsTable({ transactions }: { transactions: DbTransactionRow[] }) {
-  const [filter, setFilter] = useState<"all" | "matched" | "unmatched" | "excluded">("all")
-  const visible = transactions.filter(t => filter === "all" || t.matchStatus === filter)
-
-  return (
-    <div className="space-y-2 mt-2">
-      <div className="flex gap-2 flex-wrap">
-        {(["all", "matched", "unmatched", "excluded"] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            className={cn("rounded-md px-2.5 py-0.5 text-xs font-medium transition-colors",
-              filter === f ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:bg-muted/80")}>
-            {f === "all" ? "Tout" : f === "matched" ? "Rapprochés" : f === "unmatched" ? "Non rapprochés" : "Exclus"}
-          </button>
-        ))}
-        <span className="ml-auto text-xs text-muted-foreground self-center">{visible.length} ligne{visible.length !== 1 ? "s" : ""}</span>
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[500px] text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/30">
-              <th className="px-3 py-1.5 text-left text-xs font-medium text-muted-foreground w-[88px]">Date</th>
-              <th className="px-3 py-1.5 text-left text-xs font-medium text-muted-foreground">Libellé</th>
-              <th className="px-3 py-1.5 text-right text-xs font-medium text-muted-foreground w-[96px]">Montant</th>
-              <th className="px-3 py-1.5 text-left text-xs font-medium text-muted-foreground w-[108px]">Statut</th>
+                </div>
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {visible.map(t => (
-              <tr key={t.id} className={cn("hover:bg-muted/20", t.matchStatus === "excluded" && "opacity-50")}>
-                <td className="px-3 py-1.5 text-xs text-muted-foreground whitespace-nowrap">{formatDate(t.date)}</td>
-                <td className="px-3 py-1.5 max-w-[260px]">
-                  <p className="truncate text-sm text-foreground" title={t.label}>{t.label}</p>
-                  {t.typeOperation && t.typeOperation !== "Carte bancaire" && (
-                    <p className="text-[10px] text-muted-foreground">{t.typeOperation}</p>
-                  )}
-                </td>
-                <td className={cn("px-3 py-1.5 text-right font-mono text-xs tabular-nums whitespace-nowrap",
-                  t.matchStatus === "excluded" ? "text-muted-foreground"
-                  : t.amount < 0 ? "text-[var(--danger)]" : "text-[var(--success)]")}>
-                  {t.matchStatus === "excluded" ? "—" : formatEur(t.amount)}
-                </td>
-                <td className="px-3 py-1.5"><StatusBadge status={t.matchStatus} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {visible.length === 0 && (
-          <p className="py-6 text-center text-sm text-muted-foreground">Aucune transaction pour ce filtre.</p>
-        )}
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── Header résumé ────────────────────────────────────────────────────────────
+
+function SummaryHeader({
+  totalSpent,
+  totalTransactions,
+  period,
+  type,
+  filename,
+}: {
+  totalSpent:        number
+  totalTransactions: number
+  period:            string
+  type:              "carte" | "compte"
+  filename:          string
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="outline" className="text-[10px] font-normal">
+          {type === "carte" ? "Relevé Carte" : "Compte courant"}
+        </Badge>
+        <span className="truncate text-xs font-mono text-muted-foreground">{filename}</span>
+      </div>
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <span className="text-2xl font-bold tabular-nums text-foreground">
+          {formatEur(totalSpent)}
+        </span>
+        <span className="text-sm text-muted-foreground">
+          {totalTransactions} transaction{totalTransactions !== 1 ? "s" : ""}
+        </span>
+        <span className="text-sm text-muted-foreground">·</span>
+        <span className="text-sm font-medium text-foreground">{period}</span>
       </div>
     </div>
   )
 }
 
-// ─── Carte historique d'un import ────────────────────────────────────────────
+// ─── Historique — carte d'un import ──────────────────────────────────────────
 
 function ImportHistoryCard({
   imp,
-  onExpand,
   expanded,
   loadingDetail,
   detail,
+  onExpand,
 }: {
   imp:           HistoryImport
-  onExpand:      (id: string) => void
   expanded:      boolean
   loadingDetail: boolean
   detail:        DbTransactionRow[] | null
+  onExpand:      (id: string) => void
 }) {
-  const matchRate = imp.stats && imp.stats.total > 0
-    ? Math.round((imp.stats.matched / imp.stats.total) * 100)
+  const debitTotal = detail
+    ? Math.round(
+        detail
+          .filter(t => t.matchStatus !== "excluded" && t.amount < 0)
+          .reduce((s, t) => s + Math.abs(t.amount), 0) * 100,
+      ) / 100
     : null
 
   return (
     <div className="rounded-lg border border-border bg-[var(--panel-background)] overflow-hidden">
-      {/* Header cliquable */}
       <button
         className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-muted/20 transition-colors"
         onClick={() => onExpand(imp.id)}
@@ -339,37 +255,77 @@ function ImportHistoryCard({
             <span className="truncate text-sm font-medium text-foreground">{imp.filename}</span>
             <Badge
               variant="outline"
-              className={cn("text-[10px] font-normal shrink-0",
-                imp.status === "confirmed" && "border-[var(--success)]/40 text-[var(--success)]"
+              className={cn(
+                "text-[10px] font-normal shrink-0",
+                imp.status === "confirmed" && "border-[var(--success)]/40 text-[var(--success)]",
               )}
             >
               {imp.status === "confirmed" ? "Confirmé" : imp.status === "error" ? "Erreur" : "Parsé"}
             </Badge>
+            <Badge variant="outline" className="text-[10px] font-normal shrink-0">
+              {imp.type === "carte" ? "Carte" : "Compte"}
+            </Badge>
           </div>
-          {imp.stats ? (
-            <StatsRow stats={imp.stats} type={imp.type} showAmount />
-          ) : (
-            <p className="text-xs text-muted-foreground">{imp.rowCount} lignes</p>
-          )}
+          <p className="text-xs text-muted-foreground">
+            {imp.stats ? `${imp.stats.total} lignes` : `${imp.rowCount} lignes`}
+            {imp.stats?.totalAmount
+              ? ` · ${formatEur(imp.stats.totalAmount)}`
+              : ""}
+          </p>
         </div>
-        <div className="shrink-0 text-right">
-          <p className="text-xs text-muted-foreground">{formatDateTime(imp.uploadedAt)}</p>
-          {matchRate !== null && (
-            <p className="text-xs tabular-nums font-medium text-foreground">{matchRate}% rapprochés</p>
-          )}
-        </div>
+        <p className="shrink-0 text-xs text-muted-foreground">{formatDateTime(imp.uploadedAt)}</p>
       </button>
 
-      {/* Détail expandable */}
       {expanded && (
         <div className="border-t border-border px-4 pb-4 pt-3">
           {loadingDetail ? (
             <div className="flex items-center gap-2 py-4 text-xs text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" />
-              Chargement des transactions…
+              <Loader2 className="size-4 animate-spin" /> Chargement des transactions…
             </div>
           ) : detail ? (
-            <DbTransactionsTable transactions={detail} />
+            <div className="space-y-3">
+              {debitTotal !== null && debitTotal > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Total dépensé : <span className="font-medium text-foreground">{formatEur(debitTotal)}</span>
+                </p>
+              )}
+              <div className="overflow-x-auto rounded-lg border border-border">
+                <table className="w-full min-w-[420px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/30">
+                      <th className="px-3 py-1.5 text-left text-xs font-medium text-muted-foreground w-[88px]">Date</th>
+                      <th className="px-3 py-1.5 text-left text-xs font-medium text-muted-foreground">Libellé</th>
+                      <th className="px-3 py-1.5 text-left text-xs font-medium text-muted-foreground w-[110px]">Catégorie</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-medium text-muted-foreground w-[96px]">Montant</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {detail.filter(t => t.matchStatus !== "excluded").map(t => (
+                      <tr key={t.id} className="hover:bg-muted/20">
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground whitespace-nowrap">
+                          {formatDate(t.date)}
+                        </td>
+                        <td className="px-3 py-1.5 max-w-[200px]">
+                          <p className="truncate text-sm text-foreground" title={t.label}>{t.label}</p>
+                        </td>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground max-w-[110px]">
+                          <span className="truncate block">{t.categoryBank ?? "—"}</span>
+                        </td>
+                        <td className={cn(
+                          "px-3 py-1.5 text-right font-mono text-xs tabular-nums whitespace-nowrap",
+                          t.amount < 0 ? "text-[var(--danger)]" : "text-[var(--success)]",
+                        )}>
+                          {formatEur(t.amount)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {detail.filter(t => t.matchStatus !== "excluded").length === 0 && (
+                  <p className="py-6 text-center text-sm text-muted-foreground">Aucune transaction.</p>
+                )}
+              </div>
+            </div>
           ) : (
             <p className="text-xs text-muted-foreground py-4">Impossible de charger les transactions.</p>
           )}
@@ -381,23 +337,15 @@ function ImportHistoryCard({
 
 // ─── Section historique ───────────────────────────────────────────────────────
 
-function ImportHistory({
-  history,
-  loading,
-}: {
-  history: HistoryImport[]
-  loading: boolean
-}) {
-  const [expandedId, setExpandedId]   = useState<string | null>(null)
-  const [loadingId, setLoadingId]     = useState<string | null>(null)
-  const [details, setDetails]         = useState<Record<string, DbTransactionRow[]>>({})
+function ImportHistory({ history, loading }: { history: HistoryImport[]; loading: boolean }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [loadingId, setLoadingId]   = useState<string | null>(null)
+  const [details, setDetails]       = useState<Record<string, DbTransactionRow[]>>({})
 
   async function handleExpand(id: string) {
     if (expandedId === id) { setExpandedId(null); return }
-
     setExpandedId(id)
-    if (details[id]) return   // déjà chargé
-
+    if (details[id]) return
     setLoadingId(id)
     try {
       const res = await fetch(`/api/reconciliation/import/${id}`)
@@ -443,21 +391,20 @@ function ImportHistory({
 type Phase = "idle" | "uploading" | "review" | "confirmed"
 
 export function ReconciliationClient() {
-  const [phase, setPhase]       = useState<Phase>("idle")
-  const [result, setResult]     = useState<ImportResult | null>(null)
-  const [error, setError]       = useState<string | null>(null)
+  const [phase, setPhase]     = useState<Phase>("idle")
+  const [data, setData]       = useState<ImportData | null>(null)
+  const [error, setError]     = useState<string | null>(null)
   const [confirming, setConfirming] = useState(false)
-  const [history, setHistory]   = useState<HistoryImport[]>([])
+  const [history, setHistory] = useState<HistoryImport[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
 
-  // Charger l'historique au montage et après chaque confirmation
   async function loadHistory() {
     setHistoryLoading(true)
     try {
       const res = await fetch("/api/reconciliation/history")
       if (res.ok) {
-        const data = await res.json()
-        setHistory(data.imports ?? [])
+        const json = await res.json()
+        setHistory(json.imports ?? [])
       }
     } finally {
       setHistoryLoading(false)
@@ -474,11 +421,11 @@ export function ReconciliationClient() {
       fd.append("file", file)
       const res = await fetch("/api/reconciliation/upload", { method: "POST", body: fd })
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error((data as { error?: string }).error ?? `Erreur HTTP ${res.status}`)
+        const json = await res.json().catch(() => ({}))
+        throw new Error((json as { error?: string }).error ?? `Erreur HTTP ${res.status}`)
       }
-      const data = (await res.json()) as ImportResult
-      setResult(data)
+      const json = (await res.json()) as ImportData
+      setData(json)
       setPhase("review")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erreur inconnue")
@@ -487,23 +434,23 @@ export function ReconciliationClient() {
   }
 
   async function handleConfirm() {
-    if (!result) return
+    if (!data) return
     setConfirming(true)
     try {
       await fetch("/api/reconciliation/confirm", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ importId: result.importId }),
+        body:    JSON.stringify({ importId: data.importId }),
       })
     } finally {
       setConfirming(false)
       setPhase("confirmed")
-      loadHistory()  // Rafraîchir l'historique après confirmation
+      loadHistory()
     }
   }
 
   function handleReset() {
-    setResult(null)
+    setData(null)
     setError(null)
     setPhase("idle")
   }
@@ -513,46 +460,44 @@ export function ReconciliationClient() {
     return (
       <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
         <Loader2 className="size-8 animate-spin" />
-        <p className="text-sm">Analyse du fichier et rapprochement en cours…</p>
+        <p className="text-sm">Analyse du fichier en cours…</p>
       </div>
     )
   }
 
   // ── Review ───────────────────────────────────────────────────────────────────
-  if (phase === "review" && result) {
-    const matchRate = result.summary.total > 0
-      ? Math.round((result.summary.matched / result.summary.total) * 100)
-      : 0
-
+  if (phase === "review" && data) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-5">
         <Card className="bg-[var(--panel-background)]">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center justify-between gap-4 text-sm">
-              <span className="truncate font-mono text-xs text-muted-foreground">{result.filename}</span>
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{matchRate}% rapprochés</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <StatsRow stats={result.summary} type={result.type} showAmount />
+          <CardContent className="pt-4">
+            <SummaryHeader
+              totalSpent={data.totalSpent}
+              totalTransactions={data.totalTransactions}
+              period={data.period}
+              type={data.type}
+              filename={data.filename}
+            />
           </CardContent>
         </Card>
 
-        {result.parseErrors.length > 0 && (
+        {data.parseErrors.length > 0 && (
           <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-2 space-y-1">
             <p className="text-xs font-medium text-[var(--warning)]">Avertissements de parsing :</p>
-            {result.parseErrors.map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
+            {data.parseErrors.map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
           </div>
         )}
 
-        <TransactionsTable transactions={result.transactions} />
+        <CategoryTable summary={data.summary} />
 
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center justify-between pt-1">
           <Button variant="outline" size="sm" onClick={handleReset}>
             <RotateCcw className="size-3.5 mr-1.5" /> Nouveau fichier
           </Button>
           <Button size="sm" onClick={handleConfirm} disabled={confirming}>
-            {confirming ? <Loader2 className="size-3.5 mr-1.5 animate-spin" /> : <Check className="size-3.5 mr-1.5" />}
+            {confirming
+              ? <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+              : <Check className="size-3.5 mr-1.5" />}
             Confirmer l&apos;import
           </Button>
         </div>
@@ -561,55 +506,42 @@ export function ReconciliationClient() {
   }
 
   // ── Confirmed ─────────────────────────────────────────────────────────────────
-  if (phase === "confirmed" && result) {
-    const totalAmount = result.transactions
-      .filter(t => !t.excluded)
-      .reduce((sum, t) => sum + Math.abs(t.amount), 0)
-
+  if (phase === "confirmed" && data) {
     return (
       <div className="space-y-6">
-        {/* Bannière de confirmation */}
+        {/* Bannière */}
         <Card className="border-[var(--success)]/30 bg-[var(--success)]/5">
           <CardContent className="pt-4">
             <div className="flex items-start gap-4">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-[var(--success)]/15">
                 <Check className="size-5 text-[var(--success)]" />
               </div>
-              <div className="flex-1 min-w-0 space-y-2">
+              <div className="flex-1 min-w-0 space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <p className="font-semibold text-foreground">Import confirmé</p>
                   <Button variant="outline" size="sm" onClick={handleReset}>
                     <Upload className="size-3.5 mr-1.5" /> Nouvel import
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground truncate font-mono">{result.filename}</p>
-
-                {/* Résumé chiffré */}
-                <div className="grid grid-cols-2 gap-x-6 gap-y-1 pt-1 sm:grid-cols-4">
-                  {[
-                    { label: "Transactions",   value: String(result.summary.total),      color: "text-foreground" },
-                    { label: "Rapprochées",    value: String(result.summary.matched),    color: "text-[var(--success)]" },
-                    { label: "Non rapprochées", value: String(result.summary.unmatched), color: "text-[var(--warning)]" },
-                    { label: "Montant total",  value: formatEur(totalAmount),             color: "text-foreground" },
-                  ].map(c => (
-                    <div key={c.label}>
-                      <p className={cn("text-lg font-bold tabular-nums", c.color)}>{c.value}</p>
-                      <p className="text-[10px] text-muted-foreground">{c.label}</p>
-                    </div>
-                  ))}
-                </div>
+                <SummaryHeader
+                  totalSpent={data.totalSpent}
+                  totalTransactions={data.totalTransactions}
+                  period={data.period}
+                  type={data.type}
+                  filename={data.filename}
+                />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Détail des transactions de l'import confirmé */}
+        {/* Tableau catégories */}
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-foreground">Transactions importées</h3>
-          <TransactionsTable transactions={result.transactions} />
+          <h3 className="text-sm font-semibold text-foreground">Dépenses par catégorie</h3>
+          <CategoryTable summary={data.summary} />
         </div>
 
-        {/* Historique des imports précédents */}
+        {/* Historique */}
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-foreground">Historique des imports</h3>
           <ImportHistory history={history} loading={historyLoading} />
@@ -618,10 +550,10 @@ export function ReconciliationClient() {
     )
   }
 
-  // ── Idle (+ historique) ───────────────────────────────────────────────────────
+  // ── Idle + historique ─────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      <div className="space-y-4">
+      <div className="space-y-3">
         <UploadZone onFile={handleFile} />
         {error && (
           <p className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-4 py-2 text-sm text-[var(--danger)]">
@@ -630,7 +562,6 @@ export function ReconciliationClient() {
         )}
       </div>
 
-      {/* Historique visible dès le premier chargement */}
       {(historyLoading || history.length > 0) && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-foreground">Historique des imports</h3>
