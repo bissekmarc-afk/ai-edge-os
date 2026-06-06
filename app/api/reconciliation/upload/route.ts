@@ -115,6 +115,15 @@ export async function POST(request: NextRequest) {
     ` débits=${debits.length} total=${totalSpent}€ catégories=${summary.length} période="${period}"`,
   )
 
+  // Transactions individuelles pour le drill-down côté client (zéro requête Supabase).
+  // Seuls les débits actifs (non exclus, amount < 0) sont inclus.
+  const transactions = debits.map(t => ({
+    date:         t.date,
+    label:        t.label,
+    amount:       t.amount,
+    categoryBank: t.categoryBank,
+  }))
+
   return NextResponse.json({
     importId,
     type:              parseResult.type,
@@ -123,6 +132,7 @@ export async function POST(request: NextRequest) {
     totalTransactions: debits.length,
     period,
     summary,
+    transactions,
     parseErrors: parseResult.errors,
   })
 }

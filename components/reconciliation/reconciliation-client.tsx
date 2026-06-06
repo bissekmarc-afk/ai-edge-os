@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, useCallback, useEffect } from "react"
+import React, { useRef, useState, useCallback, useEffect, useMemo } from "react"
 import { Upload, Loader2, RotateCcw, Check, ChevronDown, ChevronRight } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,6 +10,13 @@ import type { BankCategorySummary } from "@/lib/csv/summarize"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface DrillTransaction {
+  date:         string
+  label:        string
+  amount:       number        // signé (toujours < 0 pour les débits)
+  categoryBank: string | null
+}
+
 interface ImportData {
   importId:          string
   type:              "carte" | "compte"
@@ -18,6 +25,7 @@ interface ImportData {
   totalTransactions: number
   period:            string
   summary:           BankCategorySummary[]
+  transactions:      DrillTransaction[]   // débits individuels pour le drill-down
   parseErrors:       string[]
 }
 
@@ -120,9 +128,33 @@ function UploadZone({ onFile }: { onFile: (f: File) => void }) {
   )
 }
 
-// ─── Tableau catégories ───────────────────────────────────────────────────────
+// ─── Tableau catégories avec drill-down ──────────────────────────────────────
 
-function CategoryTable({ summary }: { summary: BankCategorySummary[] }) {
+function CategoryTable({
+  summary,
+  transactions,
+}: {
+  summary:      BankCategorySummary[]
+  transactions: DrillTransaction[]
+}) {
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+
+  const toggleCategory = (category: string) => {
+    setSelectedCategory(prev => (prev === category ? null : category))
+  }
+
+  const drillTransactions = useMemo(() => {
+    if (!selectedCategory) return []
+    return transactions
+      .filter(tx => tx.categoryBank === selectedCategory && tx.amount < 0)
+      .toSorted((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
+  }, [selectedCategory, transactions])
+
+  const drillTotal = useMemo(
+    () => drillTransactions.reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
+    [drillTransactions],
+  )
+
   if (summary.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
@@ -150,30 +182,101 @@ function CategoryTable({ summary }: { summary: BankCategorySummary[] }) {
             </th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-border">
+        <tbody>
           {summary.map(row => (
-            <tr key={row.category} className="hover:bg-muted/20 transition-colors">
-              <td className="px-4 py-2.5 font-medium text-foreground">{row.category}</td>
-              <td className="px-4 py-2.5 text-right font-mono text-sm tabular-nums text-[var(--danger)]">
-                {formatEur(row.totalSpent)}
-              </td>
-              <td className="px-4 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
-                {row.transactionCount}
-              </td>
-              <td className="px-4 py-2.5 text-right">
-                <div className="flex items-center justify-end gap-2">
-                  <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-[var(--ai-accent)]"
-                      style={{ width: `${Math.min(row.shareOfTotalPct, 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
-                    {row.shareOfTotalPct.toFixed(1)}%
+            <React.Fragment key={row.category}>
+              {/* Ligne catégorie — cliquable */}
+              <tr
+                role="button"
+                tabIndex={0}
+                aria-expanded={selectedCategory === row.category}
+                onClick={() => toggleCategory(row.category)}
+                onKeyDown={e => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    toggleCategory(row.category)
+                  }
+                }}
+                className={cn(
+                  "cursor-pointer transition-colors border-t border-border",
+                  selectedCategory === row.category
+                    ? "bg-muted/40"
+                    : "hover:bg-muted/20",
+                )}
+              >
+                <td className="px-4 py-2.5 font-medium text-foreground">
+                  <span className="mr-2 text-xs text-muted-foreground" aria-hidden="true">
+                    {selectedCategory === row.category ? "▼" : "▶"}
                   </span>
-                </div>
-              </td>
-            </tr>
+                  {row.category}
+                </td>
+                <td className="px-4 py-2.5 text-right font-mono text-sm tabular-nums text-[var(--danger)]">
+                  {formatEur(row.totalSpent)}
+                </td>
+                <td className="px-4 py-2.5 text-right text-sm tabular-nums text-muted-foreground">
+                  {row.transactionCount}
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-[var(--ai-accent)]"
+                        style={{ width: `${Math.min(row.shareOfTotalPct, 100)}%` }}
+                      />
+                    </div>
+                    <span className="text-xs tabular-nums text-muted-foreground w-10 text-right">
+                      {row.shareOfTotalPct.toFixed(1)}%
+                    </span>
+                  </div>
+                </td>
+              </tr>
+
+              {/* Détail inline — visible si catégorie sélectionnée */}
+              {selectedCategory === row.category && (
+                <tr className="border-t border-border/50">
+                  <td colSpan={4} className="p-0">
+                    <div className="bg-muted/30 px-5 py-3 space-y-2">
+                      {/* Header drill */}
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {drillTransactions.length > 0
+                          ? `${drillTransactions.length} transaction${drillTransactions.length > 1 ? "s" : ""} · Total ${formatEur(drillTotal)}`
+                          : "Aucune transaction"}
+                      </p>
+
+                      {/* Mini-table transactions */}
+                      {drillTransactions.length > 0 && (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-border/50">
+                              <th className="py-1 text-left font-medium text-muted-foreground w-[88px]">Date</th>
+                              <th className="py-1 text-left font-medium text-muted-foreground">Libellé</th>
+                              <th className="py-1 text-right font-medium text-muted-foreground w-[96px]">Montant</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border/30">
+                            {drillTransactions.map((tx, i) => (
+                              <tr key={i} className="hover:bg-muted/30 transition-colors">
+                                <td className="py-1.5 text-muted-foreground whitespace-nowrap">
+                                  {formatDate(tx.date)}
+                                </td>
+                                <td className="py-1.5 max-w-[300px]">
+                                  <span className="truncate block text-foreground" title={tx.label}>
+                                    {tx.label}
+                                  </span>
+                                </td>
+                                <td className="py-1.5 text-right font-mono tabular-nums text-[var(--danger)]">
+                                  {formatEur(Math.abs(tx.amount))}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
           ))}
         </tbody>
       </table>
@@ -488,7 +591,7 @@ export function ReconciliationClient() {
           </div>
         )}
 
-        <CategoryTable summary={data.summary} />
+        <CategoryTable summary={data.summary} transactions={data.transactions} />
 
         <div className="flex items-center justify-between pt-1">
           <Button variant="outline" size="sm" onClick={handleReset}>
@@ -538,7 +641,7 @@ export function ReconciliationClient() {
         {/* Tableau catégories */}
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">Dépenses par catégorie</h3>
-          <CategoryTable summary={data.summary} />
+          <CategoryTable summary={data.summary} transactions={data.transactions} />
         </div>
 
         {/* Historique */}
