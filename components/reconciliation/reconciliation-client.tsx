@@ -146,7 +146,12 @@ function CategoryTable({
   const drillTransactions = useMemo(() => {
     if (!selectedCategory) return []
     return transactions
-      .filter(tx => tx.categoryBank === selectedCategory && tx.amount < 0)
+      .filter(tx =>
+        (selectedCategory === "Non catégorisé"
+          ? (tx.categoryBank === null || tx.categoryBank === "Non catégorisé")
+          : tx.categoryBank === selectedCategory) &&
+        tx.amount < 0
+      )
       .toSorted((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
   }, [selectedCategory, transactions])
 
