@@ -162,12 +162,22 @@ function parseCompte(text: string): ParseResult {
   const colLabel  = findCol(headers, "libel")
   const colDebit  = findCol(headers, "debit")
   const colCredit = findCol(headers, "credit")
+  const colCat    = findCol(headers, "categorie")   // "Catégorie" → normalisé "categorie"
   // Type d'opération : chercher "type" ou "operation"
   const colType   = (() => {
     const t = findCol(headers, "type")
     if (t !== -1) return t
     return findCol(headers, "operation")
   })()
+
+  // Debug : afficher les colonnes réelles après décodage latin-1 + normalisation
+  console.log(
+    `[parseCompte] headers (${headers.length}): ${headers.map((h, i) => `[${i}]${h}`).join(" | ")}`,
+  )
+  console.log(
+    `[parseCompte] colonnes détectées — date:${colDate} label:${colLabel}` +
+    ` debit:${colDebit} credit:${colCredit} categorie:${colCat} type:${colType}`,
+  )
 
   const errors: string[] = []
   if (colDate === -1 || colLabel === -1) {
@@ -193,11 +203,13 @@ function parseCompte(text: string): ParseResult {
     if (!date)  { errors.push(`Ligne ${i + 1} : date invalide "${cols[colDate]}"`); rowsSkipped++; continue }
     if (!label) { rowsSkipped++; continue }
 
+    const categoryBank = colCat !== -1 ? (cols[colCat]?.trim() || null) : null
+
     // Règle 1 : exclure DEBIT DIFFERE dans le libellé
     if (COMPTE_EXCLUDED_LABELS.some(excl => labelLow.includes(excl))) {
       rowsExcluded++
       transactions.push({
-        date, label, amount: 0, categoryBank: null, subCategory: null, typeOperation: typeOp,
+        date, label, amount: 0, categoryBank, subCategory: null, typeOperation: typeOp,
         excluded: true, excludeReason: "DEBIT DIFFERE",
       })
       continue
@@ -207,7 +219,7 @@ function parseCompte(text: string): ParseResult {
     if (COMPTE_EXCLUDED_TYPE_OPS.some(excl => typeOpLow.includes(excl))) {
       rowsExcluded++
       transactions.push({
-        date, label, amount: 0, categoryBank: null, subCategory: null, typeOperation: typeOp,
+        date, label, amount: 0, categoryBank, subCategory: null, typeOperation: typeOp,
         excluded: true, excludeReason: "Carte bancaire (déjà dans relevé carte)",
       })
       continue
@@ -222,7 +234,7 @@ function parseCompte(text: string): ParseResult {
 
     transactions.push({
       date, label, amount,
-      categoryBank:  null,
+      categoryBank,
       subCategory:   null,
       typeOperation: typeOp,
       excluded:      false,
