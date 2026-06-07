@@ -116,13 +116,81 @@ export async function POST(request: NextRequest) {
   )
 
   // Transactions individuelles pour le drill-down côté client (zéro requête Supabase).
-  // Seuls les débits actifs (non exclus, amount < 0) sont inclus.
   const transactions = debits.map(t => ({
     date:         t.date,
     label:        t.label,
     amount:       t.amount,
     categoryBank: t.categoryBank,
   }))
+
+  // ── Contrôle d'exhaustivité ───────────────────────────────────────────────
+  //
+  // Mois primaire = mois avec le plus gros volume de débits (cas typique : 1 mois).
+  // On interroge finance_entries côté serveur pour comparer avec le P&L saisi.
+
+  type Coverage = {
+    month:               number
+    year:                number
+    bankExpenses:        number
+    actualExpenses:      number
+    gap:                 number
+    coverageRatio:       number
+    currentMonthPartial: boolean
+  }
+
+  let coverage: Coverage | null = null
+
+  if (debits.length > 0) {
+    // Mois avec le plus gros volume de débits
+    const monthSums = new Map<string, number>()
+    for (const t of debits) {
+      const key = t.date.slice(0, 7)
+      monthSums.set(key, (monthSums.get(key) ?? 0) + Math.abs(t.amount))
+    }
+    const primaryKey = [...monthSums.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+
+    if (primaryKey) {
+      const [yearStr, monthStr] = primaryKey.split("-")
+      const txMonth = parseInt(monthStr, 10)
+      const txYear  = parseInt(yearStr,  10)
+      const bankExpenses = Math.round((monthSums.get(primaryKey) ?? 0) * 100) / 100
+
+      // Fetch finance_entries actual expenses pour ce mois
+      const { data: feData, error: feError } = await supabase
+        .from("finance_entries")
+        .select("amount")
+        .eq("scenario",    "actual")
+        .eq("entry_type",  "expense")
+        .eq("is_non_cash", false)
+        .eq("is_subtotal", false)
+        .eq("month",       txMonth)
+        .eq("year",        txYear)
+        .or("sync_status.neq.deleted,sync_status.is.null")
+
+      if (!feError && feData) {
+        const actualExpenses = Math.round(
+          feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+        ) / 100
+
+        const gap           = Math.round((bankExpenses - actualExpenses) * 100) / 100
+        const coverageRatio = bankExpenses > 0
+          ? Math.round((actualExpenses / bankExpenses) * 1000) / 1000
+          : 0
+
+        const now = new Date()
+        const currentMonthPartial =
+          txMonth === (now.getMonth() + 1) && txYear === now.getFullYear()
+
+        coverage = { month: txMonth, year: txYear, bankExpenses, actualExpenses, gap, coverageRatio, currentMonthPartial }
+
+        console.log(
+          `[reconciliation/upload] coverage ${txYear}-M${String(txMonth).padStart(2,"0")}` +
+          ` bank=${bankExpenses}€ actual=${actualExpenses}€` +
+          ` gap=${gap}€ ratio=${(coverageRatio * 100).toFixed(1)}%`,
+        )
+      }
+    }
+  }
 
   return NextResponse.json({
     importId,
@@ -133,6 +201,7 @@ export async function POST(request: NextRequest) {
     period,
     summary,
     transactions,
+    coverage,
     parseErrors: parseResult.errors,
   })
 }

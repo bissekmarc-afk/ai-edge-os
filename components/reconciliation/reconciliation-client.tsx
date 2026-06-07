@@ -17,6 +17,16 @@ interface DrillTransaction {
   categoryBank: string | null
 }
 
+interface CoverageData {
+  month:               number
+  year:                number
+  bankExpenses:        number
+  actualExpenses:      number
+  gap:                 number
+  coverageRatio:       number
+  currentMonthPartial: boolean
+}
+
 interface ImportData {
   importId:          string
   type:              "carte" | "compte"
@@ -26,6 +36,7 @@ interface ImportData {
   period:            string
   summary:           BankCategorySummary[]
   transactions:      DrillTransaction[]   // débits individuels pour le drill-down
+  coverage:          CoverageData | null
   parseErrors:       string[]
 }
 
@@ -124,6 +135,73 @@ function UploadZone({ onFile }: { onFile: (f: File) => void }) {
         className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = "" }}
       />
+    </div>
+  )
+}
+
+// ─── Bloc contrôle d'exhaustivité ────────────────────────────────────────────
+
+const MONTHS_FR_FULL = [
+  "janv.", "févr.", "mars", "avr.", "mai", "juin",
+  "juil.", "août",  "sept.", "oct.", "nov.", "déc.",
+]
+
+function CoverageBlock({ coverage }: { coverage: CoverageData }) {
+  const { month, year, bankExpenses, actualExpenses, gap, coverageRatio, currentMonthPartial } = coverage
+  const pct = Math.round(coverageRatio * 1000) / 10   // 1 decimal
+
+  const level: "red" | "orange" | "green" =
+    gap > 500 || coverageRatio < 0.85 ? "red"    :
+    gap > 100 || coverageRatio < 0.95 ? "orange" : "green"
+
+  const statusLabel  = level === "red" ? "Écart important" : level === "orange" ? "Couverture partielle" : "Exhaustif"
+  const statusColor  = level === "red"
+    ? "bg-[var(--danger)]/10  text-[var(--danger)]"
+    : level === "orange"
+      ? "bg-[var(--warning)]/10 text-[var(--warning)]"
+      : "bg-[var(--success)]/10 text-[var(--success)]"
+  const gapColor     = gap > 0
+    ? level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]"
+    : "text-[var(--success)]"
+
+  const periodLabel = `${MONTHS_FR_FULL[month - 1]} ${year}`
+
+  return (
+    <div className={cn(
+      "rounded-lg border px-4 py-3 space-y-2",
+      level === "red"    ? "border-[var(--danger)]/30  bg-[var(--danger)]/5"  :
+      level === "orange" ? "border-[var(--warning)]/30 bg-[var(--warning)]/5" :
+      "border-[var(--success)]/30 bg-[var(--success)]/5",
+    )}>
+      {/* Header */}
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs font-semibold text-foreground">
+          Contrôle d&apos;exhaustivité — {periodLabel}
+        </p>
+        {currentMonthPartial && (
+          <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
+            mois partiel
+          </span>
+        )}
+        <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", statusColor)}>
+          {statusLabel}
+        </span>
+      </div>
+
+      {/* Métriques */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
+        {[
+          { label: "Dépenses bancaires", value: formatEur(bankExpenses), color: "text-foreground" },
+          { label: "Dépenses saisies",   value: formatEur(actualExpenses), color: "text-foreground" },
+          { label: "Écart",              value: formatEur(gap), color: gapColor },
+          { label: "Couverture P&L",     value: `${pct}%`,  color: level === "green" ? "text-[var(--success)]" : level === "orange" ? "text-[var(--warning)]" : "text-[var(--danger)]" },
+        ].map(m => (
+          <div key={m.label}>
+            <p className="text-[10px] text-muted-foreground">{m.label}</p>
+            <p className={cn("text-sm font-semibold tabular-nums", m.color)}>{m.value}</p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -596,6 +674,7 @@ export function ReconciliationClient() {
           </div>
         )}
 
+        {data.coverage && <CoverageBlock coverage={data.coverage} />}
         <CategoryTable summary={data.summary} transactions={data.transactions} />
 
         <div className="flex items-center justify-between pt-1">
@@ -646,7 +725,8 @@ export function ReconciliationClient() {
         {/* Tableau catégories */}
         <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">Dépenses par catégorie</h3>
-          <CategoryTable summary={data.summary} transactions={data.transactions} />
+          {data.coverage && <CoverageBlock coverage={data.coverage} />}
+        <CategoryTable summary={data.summary} transactions={data.transactions} />
         </div>
 
         {/* Historique */}
