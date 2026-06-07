@@ -173,12 +173,17 @@ export async function POST(request: NextRequest) {
       const dateMax  = `${txYear}-${String(txMonth).padStart(2,"0")}-31`
 
       // ── Req 1 : bank_transactions du mois (import_ids + débits totaux) ──
-      const { data: btMonth } = await supabase
+      const { data: btMonth, error: btErr } = await supabase
         .from("bank_transactions")
         .select("import_id, amount")
         .eq("user_id", user.id)
         .gte("date", dateMin)
         .lte("date", dateMax)
+
+      console.log(
+        `[coverage] bank_transactions query: dateMin=${dateMin} dateMax=${dateMax}` +
+        ` → count=${btMonth?.length ?? 0} error=${btErr?.message ?? "none"}`,
+      )
 
       const monthImportIds = [...new Set((btMonth ?? []).map(r => r.import_id as string))]
       const totalBankDebits = Math.round(
@@ -187,7 +192,16 @@ export async function POST(request: NextRequest) {
           .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
       ) / 100
 
-      // ── Req 2 : csv_imports confirmés pour ces ids ──────────────────────
+      console.log(`[coverage] import_ids pour ${txYear}-M${txMonth}: ${JSON.stringify(monthImportIds)}`)
+
+      // ── Req 2 : types des imports qui ont des bank_transactions ce mois ──
+      //
+      // On ne filtre PAS par status='confirmed' : si les bank_transactions existent
+      // pour les deux types (carte + compte), le coverage est calculable même si
+      // l'un des imports n'est pas encore confirmé (status='parsed').
+      // Le critère correct est "les données sont-elles présentes ?" pas "sont-elles
+      // officiellement validées ?".
+
       let bothTypesConfirmed = false
       let confirmedTypes: string[] = []
 
@@ -197,16 +211,21 @@ export async function POST(request: NextRequest) {
           .select("type, status")
           .in("id", monthImportIds)
           .eq("user_id", user.id)
-          .eq("status",  "confirmed")
 
+        console.log(
+          `[coverage] imports pour ${txYear}-M${txMonth}:`,
+          (importsForMonth ?? []).map(i => `${i.type}:${i.status}`),
+        )
+
+        // Les "types présents" = imports ayant des bank_transactions ce mois
+        // (peu importe le statut confirmed/parsed)
         confirmedTypes = [...new Set((importsForMonth ?? []).map(i => i.type as string))]
         bothTypesConfirmed = confirmedTypes.includes("carte") && confirmedTypes.includes("compte")
       }
 
       console.log(
-        `[coverage] month=${txYear}-M${txMonth} imports=${monthImportIds.length}` +
-        ` confirmedTypes=${JSON.stringify(confirmedTypes)}` +
-        ` bothConfirmed=${bothTypesConfirmed} totalBankDebits=${totalBankDebits}`,
+        `[coverage] typesPresents=${JSON.stringify(confirmedTypes)}` +
+        ` bothTypes=${bothTypesConfirmed} totalBankDebits=${totalBankDebits}`,
       )
 
       // bankExpenses : seulement si les deux types sont confirmés (total réel du mois)
