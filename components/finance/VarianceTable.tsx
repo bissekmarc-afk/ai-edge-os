@@ -106,6 +106,69 @@ function normalizeCategory(cat: string): { key: string; display: string } {
   return { key: lower || "non categorise", display: trimmed || "Non catégorisé" }
 }
 
+// ─── Résolution du type income / expense ──────────────────────────────────────
+//
+// budget_initial et actual stockent parfois des entry_type incorrects
+// (null, "revenue" au lieu de "income", ou "expense" pour des revenus).
+// On force la classification via la catégorie normalisée en priorité.
+//
+// Priorité : catégorie connue > entry_type de la DB > défaut "expense"
+
+const INCOME_CATEGORIES = new Set([
+  "income", "revenue", "revenues", "salaire", "loyer recu",
+])
+
+const EXPENSE_CATEGORIES = new Set([
+  "personal", "housing", "transport", "food", "health", "leisure",
+  "debt", "debt repayments", "debt repayment", "loan repayments", "loan repayment",
+  "savings", "savings or investments", "investment", "investments",
+  "tontine", "capex", "tax", "taxes", "odd", "one-off",
+  "big & one-offs", "big one-offs", "gifts", "gift", "art",
+])
+
+function resolveEntryType(
+  rawType: string | null,
+  catKey:  string,          // clé normalisée (toLowerCase, sans accents)
+): "income" | "expense" {
+  // 1. Catégorie explicitement reconnue comme income
+  if (INCOME_CATEGORIES.has(catKey)) return "income"
+  // 2. Catégorie explicitement reconnue comme expense
+  if (EXPENSE_CATEGORIES.has(catKey)) return "expense"
+  // 3. Fallback sur le entry_type de la DB
+  if (rawType === "income" || rawType === "revenue") return "income"
+  // 4. Défaut : expense
+  return "expense"
+}
+
+// ─── Statut variance ──────────────────────────────────────────────────────────
+//
+// Seuils (calculés sur variancePct = varianceEur / budgetNorm × 100) :
+//
+//   expense :
+//     variancePct > +15%  → "unfavourable" (sur-dépense)
+//     variancePct < -5%   → "favourable"   (économie)
+//     sinon               → "ok"
+//
+//   income :
+//     variancePct < -15%  → "unfavourable" (sous-recette)
+//     variancePct > +5%   → "favourable"   (surplus)
+//     sinon               → "ok"
+
+function getVarianceStatus(
+  variancePct: number,
+  entryType:   "income" | "expense",
+): VarianceStatus {
+  if (entryType === "expense") {
+    if (variancePct > 15)  return "unfavourable"
+    if (variancePct < -5)  return "favourable"
+    return "ok"
+  }
+  // income
+  if (variancePct < -15) return "unfavourable"
+  if (variancePct > 5)   return "favourable"
+  return "ok"
+}
+
 // ─── Agrégation par catégorie ─────────────────────────────────────────────────
 //
 // Les montants actual expense sont stockés négatifs en DB (Cash Out).
@@ -121,8 +184,7 @@ function aggregateByCategory(entries: FinanceEntry[]): Map<string, CatBucket> {
   for (const row of entries) {
     const { key, display } = normalizeCategory(row.category ?? "")
     const rawType   = row.entry_type as string | null
-    const entryType: "income" | "expense" =
-      (rawType === "income" || rawType === "revenue") ? "income" : "expense"
+    const entryType = resolveEntryType(rawType, key)
 
     // Normaliser dès l'agrégation : expense → abs, income → tel quel
     const rawAmount = Number(row.amount ?? 0)
@@ -140,16 +202,9 @@ function aggregateByCategory(entries: FinanceEntry[]): Map<string, CatBucket> {
 
 // ─── Outer merge ──────────────────────────────────────────────────────────────
 //
-// Normalisation :
-//   expense → Math.abs() des deux côtés ; varianceEur = actual_abs − budget_abs
-//   income  → valeurs positives ; varianceEur = actual − budget
-//
-// Statut favorable/défavorable :
-//   expense : actual > budget × 1.15  → unfavourable (sur-dépense)
-//             actual ≤ budget × 1.15  → ok
-//   income  : actual < budget × 0.85  → unfavourable (sous-recette)
-//             actual > budget         → favourable
-//             sinon                   → ok
+// entryType final résolu via resolveEntryType(catKey) — catégorie prime
+// sur le entry_type stocké en DB (peut être erroné dans budget_initial).
+// varianceEur = actualNorm − budgetNorm (toujours positifs après agrégation).
 
 function buildVarianceRows(
   actualMap: Map<string, CatBucket>,
@@ -161,15 +216,15 @@ function buildVarianceRows(
     const a = actualMap.get(key)
     const b = budgetMap.get(key)
 
-    const entryType = (b?.entryType ?? a?.entryType ?? "expense") as "income" | "expense"
+    // entryType : priorité à la catégorie (résolution par nom) pour corriger
+    // les erreurs de classification en DB (budget_initial entry_type = null etc.)
+    const rawType   = (b?.entryType ?? a?.entryType ?? null) as string | null
+    const entryType = resolveEntryType(rawType, key)
     const category  = b?.display ?? a?.display ?? key
 
-    const actualNorm = entryType === "expense"
-      ? Math.abs(a?.raw ?? 0)
-      : (a?.raw ?? 0)
-    const budgetNorm = entryType === "expense"
-      ? Math.abs(b?.raw ?? 0)
-      : (b?.raw ?? 0)
+    // raw est déjà normalisé positif dans aggregateByCategory
+    const actualNorm = a?.raw ?? 0
+    const budgetNorm = b?.raw ?? 0
 
     const varianceEur = actualNorm - budgetNorm
 
@@ -178,13 +233,7 @@ function buildVarianceRows(
 
     if (budgetNorm !== 0) {
       variancePct = (varianceEur / budgetNorm) * 100
-      if (entryType === "expense") {
-        status = actualNorm > budgetNorm * 1.15 ? "unfavourable" : "ok"
-      } else {
-        status =
-          actualNorm < budgetNorm * 0.85 ? "unfavourable" :
-          actualNorm > budgetNorm        ? "favourable"   : "ok"
-      }
+      status      = getVarianceStatus(variancePct, entryType)
     }
 
     return { category, actual: actualNorm, budget: budgetNorm, varianceEur, variancePct, status, entryType }
