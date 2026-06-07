@@ -17,18 +17,19 @@ interface DrillTransaction {
   categoryBank: string | null
 }
 
+interface CoverageSubBlock {
+  bankExpenses:   number
+  actualExpenses: number
+  gap:            number
+  coverageRatio:  number
+}
+
 interface CoverageData {
   month:               number
   year:                number
-  bankExpenses:        number
-  actualExpenses:      number    // hors taxes à la source
-  gap:                 number
-  coverageRatio:       number
   currentMonthPartial: boolean
-  bothTypesConfirmed:  boolean
-  confirmedTypes:      string[]
-  excludedAmount:      number    // montant exclu (taxes à la source)
-  excludedLabels:      string[]  // catégories exclues
+  carte:               CoverageSubBlock
+  compte:              CoverageSubBlock
 }
 
 interface ImportData {
@@ -150,116 +151,106 @@ const MONTHS_FR_FULL = [
   "juil.", "août",  "sept.", "oct.", "nov.", "déc.",
 ]
 
-function CoverageBlock({ coverage }: { coverage: CoverageData }) {
-  const {
-    month, year, bankExpenses, actualExpenses, gap, coverageRatio,
-    currentMonthPartial, bothTypesConfirmed, confirmedTypes,
-    excludedAmount, excludedLabels,
-  } = coverage
+// ─── Sub-block panel ─────────────────────────────────────────────────────────
 
-  const pct         = Math.round(coverageRatio * 1000) / 10
-  const periodLabel = `${MONTHS_FR_FULL[month - 1]} ${year}`
+function SubBlockPanel({
+  title,
+  subtitle,
+  block,
+}: {
+  title:    string
+  subtitle: string
+  block:    CoverageSubBlock
+}) {
+  const pct = Math.round(block.coverageRatio * 1000) / 10
 
-  // ── Cas partiel : un seul CSV confirmé ──────────────────────────────────
-  if (!bothTypesConfirmed) {
-    const missing = (["carte", "compte"] as const)
-      .filter(t => !confirmedTypes.includes(t))
-      .map(t => t === "carte" ? "Relevé Carte" : "Compte courant")
-      .join(" + ")
-
-    return (
-      <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-3 space-y-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <p className="text-xs font-semibold text-foreground">
-            Contrôle d&apos;exhaustivité — {periodLabel}
-          </p>
-          {currentMonthPartial && (
-            <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
-              mois partiel
-            </span>
-          )}
-          <span className="ml-auto rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warning)]">
-            Couverture partielle
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Importez et confirmez le{missing.includes("+") ? "s" : ""}{" "}
-          <span className="font-medium text-foreground">{missing}</span>{" "}
-          pour un contrôle d&apos;exhaustivité complet.
-          {confirmedTypes.length > 0 && (
-            <span className="ml-1 text-muted-foreground/70">
-              ({confirmedTypes.map(t => t === "carte" ? "Carte" : "Compte").join(" + ")} déjà confirmé{confirmedTypes.length > 1 ? "s" : ""})
-            </span>
-          )}
-        </p>
-      </div>
-    )
-  }
-
-  // ── Cas complet : carte + compte tous les deux confirmés ──────────────────
   const level: "red" | "orange" | "green" =
-    gap > 500 || coverageRatio < 0.85 ? "red"    :
-    gap > 100 || coverageRatio < 0.95 ? "orange" : "green"
+    block.gap > 500 || block.coverageRatio < 0.85 ? "red"    :
+    block.gap > 100 || block.coverageRatio < 0.95 ? "orange" : "green"
 
-  const statusLabel = level === "red" ? "Écart important" : level === "orange" ? "À surveiller" : "Exhaustif"
-  const statusColor = level === "red"
-    ? "bg-[var(--danger)]/10  text-[var(--danger)]"
+  const noData = block.bankExpenses === 0
+
+  const gapColor = noData ? "text-muted-foreground"
+    : block.gap > 0
+      ? (level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]")
+      : "text-[var(--success)]"
+
+  const badge = noData ? null : level === "green"
+    ? <span className="rounded bg-[var(--success)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--success)]">Exhaustif</span>
     : level === "orange"
-      ? "bg-[var(--warning)]/10 text-[var(--warning)]"
-      : "bg-[var(--success)]/10 text-[var(--success)]"
-  const gapColor    = gap > 0
-    ? (level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]")
-    : "text-[var(--success)]"
+      ? <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warning)]">À surveiller</span>
+      : <span className="rounded bg-[var(--danger)]/10  px-1.5 py-0.5 text-[10px] font-semibold text-[var(--danger)]">Écart important</span>
 
   return (
-    <div className={cn(
-      "rounded-lg border px-4 py-3 space-y-2",
-      level === "red"    ? "border-[var(--danger)]/30  bg-[var(--danger)]/5"  :
-      level === "orange" ? "border-[var(--warning)]/30 bg-[var(--warning)]/5" :
-                           "border-[var(--success)]/30 bg-[var(--success)]/5",
-    )}>
+    <div className="rounded-lg border border-border bg-[var(--panel-background)] px-4 py-3 space-y-2 flex-1 min-w-[200px]">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold text-foreground">{title}</p>
+          <p className="text-[10px] text-muted-foreground">{subtitle}</p>
+        </div>
+        {badge}
+      </div>
+
+      {noData ? (
+        <p className="text-xs text-muted-foreground italic">Pas de données bancaires ce mois</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          {[
+            { label: "Bancaire", value: formatEur(block.bankExpenses), color: "text-foreground" },
+            { label: "Saisi",    value: formatEur(block.actualExpenses), color: "text-foreground" },
+            { label: "Écart",    value: formatEur(block.gap), color: gapColor },
+            { label: "Couverture", value: `${pct}%`,
+              color: level === "green" ? "text-[var(--success)]"
+                   : level === "orange" ? "text-[var(--warning)]"
+                   : "text-[var(--danger)]" },
+          ].map(m => (
+            <div key={m.label}>
+              <p className="text-[10px] text-muted-foreground">{m.label}</p>
+              <p className={cn("text-sm font-bold tabular-nums", m.color)}>{m.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Bloc coverage principal ──────────────────────────────────────────────────
+
+function CoverageBlock({ coverage }: { coverage: CoverageData }) {
+  const periodLabel = `${MONTHS_FR_FULL[coverage.month - 1]} ${coverage.year}`
+
+  return (
+    <div className="space-y-2">
+      {/* Header */}
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-xs font-semibold text-foreground">
           Contrôle d&apos;exhaustivité — {periodLabel}
         </p>
-        {currentMonthPartial && (
+        {coverage.currentMonthPartial && (
           <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
             mois partiel
           </span>
         )}
-        <span className="text-[10px] text-muted-foreground">Carte + Compte</span>
-        <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", statusColor)}>
-          {statusLabel}
-        </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
-        {[
-          { label: "Dépenses bancaires", value: formatEur(bankExpenses), color: "text-foreground" },
-          { label: "Dépenses saisies",   value: formatEur(actualExpenses), color: "text-foreground" },
-          { label: "Écart",              value: formatEur(gap), color: gapColor },
-          { label: "Couverture P&L",     value: `${pct}%`, color: level === "green" ? "text-[var(--success)]" : level === "orange" ? "text-[var(--warning)]" : "text-[var(--danger)]" },
-        ].map(m => (
-          <div key={m.label}>
-            <p className="text-[10px] text-muted-foreground">{m.label}</p>
-            <p className={cn("text-sm font-semibold tabular-nums", m.color)}>{m.value}</p>
-          </div>
-        ))}
+      {/* Deux panels côte à côte */}
+      <div className="flex flex-wrap gap-3">
+        <SubBlockPanel
+          title="Carte → Dépenses variables"
+          subtitle="Food · Leisure · Transport · Health · Personnel"
+          block={coverage.carte}
+        />
+        <SubBlockPanel
+          title="Compte → Dépenses fixes"
+          subtitle="Housing · Remboursements"
+          block={coverage.compte}
+        />
       </div>
 
-      {/* Note : catégories exclues du calcul (taxes à la source) */}
-      {excludedAmount > 0 && (
-        <p className="text-[10px] text-muted-foreground border-t border-border/30 pt-2">
-          ℹ️ Taxes exclues (prélevées à la source) :{" "}
-          <span className="font-medium">{formatEur(excludedAmount)}</span>
-          {excludedLabels.length > 0 && (
-            <span className="ml-1 opacity-60">
-              ({excludedLabels.join(", ")})
-            </span>
-          )}
-          {" — "}non comptabilisées dans l&apos;écart car sans transaction bancaire.
-        </p>
-      )}
+      <p className="text-[10px] text-muted-foreground">
+        Exclus du périmètre : Tax · Investment · Savings · Odd · Income (déduites à la source ou hors flux bancaire)
+      </p>
     </div>
   )
 }
