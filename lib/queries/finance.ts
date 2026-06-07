@@ -66,8 +66,15 @@ export async function getBudgetSummaryFromSupabase(): Promise<BudgetSummary | nu
 
   if (error || !data || data.length === 0) return null
 
-  const income   = data.filter((r) => r.entry_type === "income").reduce((s, r) => s + Number(r.amount), 0)
-  const expenses = data.filter((r) => r.entry_type === "expense").reduce((s, r) => s + Number(r.amount), 0)
+  // Capturer "revenue" en plus de "income" (certaines entrées actual utilisent
+  // entry_type = "revenue" au lieu de "income").
+  // Expense amounts stockés négatifs en DB → Math.abs() pour normaliser.
+  const income   = data
+    .filter((r) => r.entry_type === "income" || r.entry_type === "revenue")
+    .reduce((s, r) => s + Number(r.amount), 0)
+  const expenses = data
+    .filter((r) => r.entry_type === "expense")
+    .reduce((s, r) => s + Math.abs(Number(r.amount)), 0)
 
   return {
     income,

@@ -12,9 +12,10 @@
 // Outer merge : union(actualCategories, budgetCategories) par catégorie.
 // Variance % : budget = 0 → "N/A"
 
-import { cn }         from "@/lib/utils"
-import { getYearRows } from "@/lib/finance/queries"
-import type { FinanceEntry } from "@/lib/finance/aggregations"
+import { cn }                    from "@/lib/utils"
+import { getYearRows }           from "@/lib/finance/queries"
+import { computePL }             from "@/lib/finance/aggregations"
+import type { FinanceEntry }     from "@/lib/finance/aggregations"
 
 // ─── Constantes périmètre budget ──────────────────────────────────────────────
 
@@ -106,6 +107,12 @@ function normalizeCategory(cat: string): { key: string; display: string } {
 }
 
 // ─── Agrégation par catégorie ─────────────────────────────────────────────────
+//
+// Les montants actual expense sont stockés négatifs en DB (Cash Out).
+// On normalise immédiatement à la valeur absolue pour les dépenses,
+// afin que les comparaisons actual vs budget soient homogènes :
+//   expense → Math.abs(amount)   (toujours positif)
+//   income  → amount             (toujours positif en pratique)
 
 type CatBucket = { raw: number; entryType: "income" | "expense"; display: string }
 
@@ -113,16 +120,19 @@ function aggregateByCategory(entries: FinanceEntry[]): Map<string, CatBucket> {
   const map = new Map<string, CatBucket>()
   for (const row of entries) {
     const { key, display } = normalizeCategory(row.category ?? "")
-    const amount   = Number(row.amount ?? 0)
+    const rawType   = row.entry_type as string | null
+    const entryType: "income" | "expense" =
+      (rawType === "income" || rawType === "revenue") ? "income" : "expense"
+
+    // Normaliser dès l'agrégation : expense → abs, income → tel quel
+    const rawAmount = Number(row.amount ?? 0)
+    const amount    = entryType === "expense" ? Math.abs(rawAmount) : rawAmount
+
     const existing = map.get(key)
     if (existing) {
       existing.raw += amount
     } else {
-      map.set(key, {
-        raw:       amount,
-        entryType: (row.entry_type ?? "expense") as "income" | "expense",
-        display,
-      })
+      map.set(key, { raw: amount, entryType, display })
     }
   }
   return map
@@ -299,15 +309,13 @@ export async function VarianceTable({ currentMonth, currentYear }: VarianceTable
     aggregateByCategory(mtdBudgetRows),
   )
 
-  // ── NCF de synthèse ─────────────────────────────────────────────────────────
+  // ── NCF de synthèse via computePL() ─────────────────────────────────────────
+  //
+  // Utilise computePL() sur les lignes brutes pour un NCF exact (même logique
+  // que le P&L Statement), plutôt que de reconstituer à partir des catégories.
 
-  const ncf = (rows: VarianceRow[]) => rows.reduce((s, r) => {
-    const sign = r.entryType === "income" ? 1 : -1
-    return s + sign * r.actual
-  }, 0)
-
-  const ytdActualNcf = ncf(ytdRows.map(r => ({ ...r, actual: r.entryType === "income" ? r.actual : r.actual })))
-  const ytdBudgetNcf = ytdRows.reduce((s, r) => s + (r.entryType === "income" ? 1 : -1) * r.budget, 0)
+  const ytdActualNcf = computePL(ytdActualRows).netCashFlow
+  const ytdBudgetNcf = computePL(ytdBudgetRows).netCashFlow
 
   // ── Labels ──────────────────────────────────────────────────────────────────
 
