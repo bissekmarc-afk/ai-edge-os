@@ -75,6 +75,36 @@ function StatusBadge({ status }: { status: VarianceStatus }) {
   )
 }
 
+// ─── Normalisation des catégories ────────────────────────────────────────────
+//
+// budget_initial et actual peuvent utiliser des libellés différents pour
+// la même catégorie économique. Cette map ramène les variantes vers une
+// catégorie canonique (clé merge + libellé affiché).
+//
+// Format : "variante_normalisée" → "Catégorie Canonique"
+
+const CATEGORY_ALIASES: Record<string, string> = {
+  "debt repayments": "Debt",
+  "debt repayment":  "Debt",
+  "remboursements":  "Debt",
+  "loan repayments": "Debt",
+  "loan repayment":  "Debt",
+}
+
+/**
+ * Retourne la catégorie canonique à utiliser comme clé de merge.
+ * Le display (affiché à l'utilisateur) reprend la valeur canonique.
+ */
+function normalizeCategory(cat: string): { key: string; display: string } {
+  const trimmed = cat.trim()
+  const lower   = trimmed.toLowerCase()
+  const canonical = CATEGORY_ALIASES[lower]
+  if (canonical) {
+    return { key: canonical.toLowerCase(), display: canonical }
+  }
+  return { key: lower || "non categorise", display: trimmed || "Non catégorisé" }
+}
+
 // ─── Agrégation par catégorie ─────────────────────────────────────────────────
 
 type CatBucket = { raw: number; entryType: "income" | "expense"; display: string }
@@ -82,9 +112,8 @@ type CatBucket = { raw: number; entryType: "income" | "expense"; display: string
 function aggregateByCategory(entries: FinanceEntry[]): Map<string, CatBucket> {
   const map = new Map<string, CatBucket>()
   for (const row of entries) {
-    const key     = (row.category ?? "").trim().toLowerCase() || "non categorise"
-    const display = (row.category ?? "").trim() || "Non catégorisé"
-    const amount  = Number(row.amount ?? 0)
+    const { key, display } = normalizeCategory(row.category ?? "")
+    const amount   = Number(row.amount ?? 0)
     const existing = map.get(key)
     if (existing) {
       existing.raw += amount
