@@ -305,13 +305,45 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     })
   }
 
+  // ── Validation scenario avant upsert ─────────────────────────────────────
+  //
+  // La contrainte DB accepte uniquement : actual | budget_initial | reforecast_6m
+  // Les entrées Google Sheets sont toujours 'budget_initial' (hardcodé), mais on
+  // valide défensivement pour éviter une violation de contrainte silencieuse.
+
+  const VALID_SCENARIOS = new Set(["actual", "budget_initial", "reforecast_6m"])
+  let skippedScenario = 0
+
+  const validEntries = entries.filter((e) => {
+    if (!VALID_SCENARIOS.has(e.scenario as string)) {
+      console.warn(
+        `[sync/google-sheets] SKIP invalid scenario="${e.scenario}"` +
+        ` external_id="${e.external_id}"`,
+      )
+      skippedScenario++
+      return false
+    }
+    return true
+  })
+
+  if (skippedScenario > 0) {
+    console.error(`[sync/google-sheets] ⚠️  ${skippedScenario} entrée(s) avec scenario invalide ignorée(s)`)
+  }
+
+  if (validEntries.length === 0) {
+    return NextResponse.json({
+      synced: 0, parsed: 0,
+      skipped: { empty: skippedEmpty, header: skippedHeader, excluded: skippedExcluded, zero: skippedZero, scenario: skippedScenario },
+    })
+  }
+
   // ── Upsert via RPC (bypasses PostgREST schema cache) ─────────────────────
 
   const BATCH     = 500
   let totalSynced = 0
 
-  for (let i = 0; i < entries.length; i += BATCH) {
-    const batch   = entries.slice(i, i + BATCH)
+  for (let i = 0; i < validEntries.length; i += BATCH) {
+    const batch   = validEntries.slice(i, i + BATCH)
     const batchNo = Math.floor(i / BATCH) + 1
     console.log(`[sync/google-sheets] Upserting batch ${batchNo} (${batch.length} entries)…`)
 
@@ -341,13 +373,13 @@ async function handler(request: NextRequest): Promise<NextResponse> {
     amount:     e.amount,
   }))
 
-  console.log(`[sync/google-sheets] ✅ Done — parsed=${entries.length} synced=${totalSynced}`)
+  console.log(`[sync/google-sheets] ✅ Done — parsed=${entries.length} valid=${validEntries.length} synced=${totalSynced}`)
 
   return NextResponse.json({
     synced:    totalSynced,
     parsed:    entries.length,
     sheetRows: rows.length,
-    skipped:   { empty: skippedEmpty, header: skippedHeader, excluded: skippedExcluded, zero: skippedZero },
+    skipped:   { empty: skippedEmpty, header: skippedHeader, excluded: skippedExcluded, zero: skippedZero, scenario: skippedScenario },
     sampleEntries,
   })
 }

@@ -110,13 +110,43 @@ export async function POST() {
     synced_at: new Date().toISOString(),
   }))
 
-  const { error } = await supabase
+  const { error: upsertError } = await supabase
     .from("tasks_sync")
     .upsert(rows, { onConflict: "user_id,source,external_id" })
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (upsertError) {
+    return NextResponse.json({ error: upsertError.message }, { status: 500 })
   }
 
-  return NextResponse.json({ synced: rows.length })
+  // ── Supprimer les tâches qui n'existent plus dans Todoist ──────────────────
+  //
+  // L'upsert synchronise les tâches actives, mais ne supprime pas celles qui
+  // ont été complétées ou supprimées dans Todoist depuis la dernière sync.
+  // Guard : si Todoist retourne 0 tâches (API error silencieuse ?), on ne
+  // supprime rien — mieux vaut garder des fantômes que supprimer tout.
+
+  let deleted = 0
+
+  if (rows.length > 0) {
+    const activeIds = rows.map((r) => r.external_id)
+    // PostgREST NOT IN : .not("col", "in", "(val1,val2,...)")
+    const { error: deleteError, count } = await supabase
+      .from("tasks_sync")
+      .delete({ count: "exact" })
+      .eq("user_id", user.id)
+      .eq("source",  "todoist")
+      .not("external_id", "in", `(${activeIds.join(",")})`)
+
+    if (deleteError) {
+      console.error("[sync/todoist] Erreur suppression tâches orphelines:", deleteError.message)
+      // Non-fatal — l'upsert a réussi
+    } else {
+      deleted = count ?? 0
+      if (deleted > 0) {
+        console.log(`[sync/todoist] ${deleted} tâche(s) supprimée(s) (plus dans Todoist)`)
+      }
+    }
+  }
+
+  return NextResponse.json({ synced: rows.length, deleted })
 }
