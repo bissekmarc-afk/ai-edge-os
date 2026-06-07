@@ -128,6 +128,20 @@ export async function POST(request: NextRequest) {
   // Mois primaire = mois avec le plus gros volume de débits (cas typique : 1 mois).
   // On interroge finance_entries côté serveur pour comparer avec le P&L saisi.
 
+  // ── Contrôle d'exhaustivité ───────────────────────────────────────────────
+  //
+  // Le coverage n'est fiable que si les DEUX relevés du mois sont confirmés
+  // (carte + compte courant). Avec un seul CSV on compare des pommes et des oranges.
+  //
+  // Logique :
+  //   1. Mois primaire = mois avec le plus gros volume de débits du CSV courant
+  //   2. Query bank_transactions de ce mois → import_ids + total débits
+  //   3. Query csv_imports pour ces ids → vérifier carte+compte tous les deux confirmés
+  //   4. Si oui  → bankExpenses = total toutes bank_transactions du mois (carte+compte)
+  //               actualExpenses = finance_entries actual/expense du mois
+  //               → coverage complet
+  //   5. Si non  → coverage.partial = true, message "importez les deux relevés"
+
   type Coverage = {
     month:               number
     year:                number
@@ -136,12 +150,14 @@ export async function POST(request: NextRequest) {
     gap:                 number
     coverageRatio:       number
     currentMonthPartial: boolean
+    bothTypesConfirmed:  boolean  // false → afficher message partiel
+    confirmedTypes:      string[] // ex: ["carte"] ou ["carte","compte"]
   }
 
   let coverage: Coverage | null = null
 
   if (debits.length > 0) {
-    // Mois avec le plus gros volume de débits
+    // Mois primaire (plus gros volume de débits du CSV courant)
     const monthSums = new Map<string, number>()
     for (const t of debits) {
       const key = t.date.slice(0, 7)
@@ -151,15 +167,57 @@ export async function POST(request: NextRequest) {
 
     if (primaryKey) {
       const [yearStr, monthStr] = primaryKey.split("-")
-      const txMonth = parseInt(monthStr, 10)
-      const txYear  = parseInt(yearStr,  10)
-      const bankExpenses = Math.round((monthSums.get(primaryKey) ?? 0) * 100) / 100
+      const txMonth  = parseInt(monthStr, 10)
+      const txYear   = parseInt(yearStr,  10)
+      const dateMin  = `${txYear}-${String(txMonth).padStart(2,"0")}-01`
+      const dateMax  = `${txYear}-${String(txMonth).padStart(2,"0")}-31`
 
-      // Fetch finance_entries actual expenses pour ce mois
-      // user_id explicite en plus de RLS pour garantir l'isolation
+      // ── Req 1 : bank_transactions du mois (import_ids + débits totaux) ──
+      const { data: btMonth } = await supabase
+        .from("bank_transactions")
+        .select("import_id, amount")
+        .eq("user_id", user.id)
+        .gte("date", dateMin)
+        .lte("date", dateMax)
+
+      const monthImportIds = [...new Set((btMonth ?? []).map(r => r.import_id as string))]
+      const totalBankDebits = Math.round(
+        (btMonth ?? [])
+          .filter(r => Number(r.amount) < 0)
+          .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+      ) / 100
+
+      // ── Req 2 : csv_imports confirmés pour ces ids ──────────────────────
+      let bothTypesConfirmed = false
+      let confirmedTypes: string[] = []
+
+      if (monthImportIds.length > 0) {
+        const { data: importsForMonth } = await supabase
+          .from("csv_imports")
+          .select("type, status")
+          .in("id", monthImportIds)
+          .eq("user_id", user.id)
+          .eq("status",  "confirmed")
+
+        confirmedTypes = [...new Set((importsForMonth ?? []).map(i => i.type as string))]
+        bothTypesConfirmed = confirmedTypes.includes("carte") && confirmedTypes.includes("compte")
+      }
+
+      console.log(
+        `[coverage] month=${txYear}-M${txMonth} imports=${monthImportIds.length}` +
+        ` confirmedTypes=${JSON.stringify(confirmedTypes)}` +
+        ` bothConfirmed=${bothTypesConfirmed} totalBankDebits=${totalBankDebits}`,
+      )
+
+      // bankExpenses : seulement si les deux types sont confirmés (total réel du mois)
+      const bankExpenses = bothTypesConfirmed
+        ? totalBankDebits
+        : (monthSums.get(primaryKey) ?? 0)  // provisoire : juste ce CSV
+
+      // ── Req 3 : finance_entries actual/expense du mois ──────────────────
       const { data: feData, error: feError } = await supabase
         .from("finance_entries")
-        .select("amount, entry_type, scenario")
+        .select("amount")
         .eq("user_id",     user.id)
         .eq("scenario",    "actual")
         .eq("entry_type",  "expense")
@@ -170,21 +228,9 @@ export async function POST(request: NextRequest) {
         .or("sync_status.neq.deleted,sync_status.is.null")
 
       if (!feError && feData) {
-        // Debug : vérifier les filtres en loggant count + sommes
-        const sumRaw = feData.reduce((s, r) => s + Number(r.amount), 0)
-        const sumAbs = feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0)
-        console.log(
-          `[reconciliation/upload] coverage finance_entries:` +
-          ` count=${feData.length} sum_raw=${sumRaw.toFixed(2)} sum_abs=${sumAbs.toFixed(2)}` +
-          ` month=${txMonth} year=${txYear}`,
-        )
-
-        // Vérification des scénarios présents (ne doit voir que "actual")
-        const scenarios = [...new Set(feData.map(r => r.scenario as string))]
-        const types     = [...new Set(feData.map(r => r.entry_type as string))]
-        console.log(`[reconciliation/upload] scenarios=${JSON.stringify(scenarios)} entry_types=${JSON.stringify(types)}`)
-
-        const actualExpenses = Math.round(sumAbs * 100) / 100
+        const actualExpenses = Math.round(
+          feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+        ) / 100
 
         const gap           = Math.round((bankExpenses - actualExpenses) * 100) / 100
         const coverageRatio = bankExpenses > 0
@@ -195,11 +241,14 @@ export async function POST(request: NextRequest) {
         const currentMonthPartial =
           txMonth === (now.getMonth() + 1) && txYear === now.getFullYear()
 
-        coverage = { month: txMonth, year: txYear, bankExpenses, actualExpenses, gap, coverageRatio, currentMonthPartial }
+        coverage = {
+          month: txMonth, year: txYear,
+          bankExpenses, actualExpenses, gap, coverageRatio,
+          currentMonthPartial, bothTypesConfirmed, confirmedTypes,
+        }
 
         console.log(
-          `[reconciliation/upload] coverage ${txYear}-M${String(txMonth).padStart(2,"0")}` +
-          ` bank=${bankExpenses}€ actual=${actualExpenses}€` +
+          `[coverage] result: bank=${bankExpenses}€ actual=${actualExpenses}€` +
           ` gap=${gap}€ ratio=${(coverageRatio * 100).toFixed(1)}%`,
         )
       }

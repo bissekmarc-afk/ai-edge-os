@@ -25,6 +25,8 @@ interface CoverageData {
   gap:                 number
   coverageRatio:       number
   currentMonthPartial: boolean
+  bothTypesConfirmed:  boolean    // true = carte + compte confirmés → coverage fiable
+  confirmedTypes:      string[]   // ex: ["carte"] ou ["carte","compte"]
 }
 
 interface ImportData {
@@ -147,33 +149,72 @@ const MONTHS_FR_FULL = [
 ]
 
 function CoverageBlock({ coverage }: { coverage: CoverageData }) {
-  const { month, year, bankExpenses, actualExpenses, gap, coverageRatio, currentMonthPartial } = coverage
-  const pct = Math.round(coverageRatio * 1000) / 10   // 1 decimal
+  const {
+    month, year, bankExpenses, actualExpenses, gap, coverageRatio,
+    currentMonthPartial, bothTypesConfirmed, confirmedTypes,
+  } = coverage
 
+  const pct         = Math.round(coverageRatio * 1000) / 10
+  const periodLabel = `${MONTHS_FR_FULL[month - 1]} ${year}`
+
+  // ── Cas partiel : un seul CSV confirmé ──────────────────────────────────
+  if (!bothTypesConfirmed) {
+    const missing = (["carte", "compte"] as const)
+      .filter(t => !confirmedTypes.includes(t))
+      .map(t => t === "carte" ? "Relevé Carte" : "Compte courant")
+      .join(" + ")
+
+    return (
+      <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-3 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs font-semibold text-foreground">
+            Contrôle d&apos;exhaustivité — {periodLabel}
+          </p>
+          {currentMonthPartial && (
+            <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
+              mois partiel
+            </span>
+          )}
+          <span className="ml-auto rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warning)]">
+            Couverture partielle
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Importez et confirmez le{missing.includes("+") ? "s" : ""}{" "}
+          <span className="font-medium text-foreground">{missing}</span>{" "}
+          pour un contrôle d&apos;exhaustivité complet.
+          {confirmedTypes.length > 0 && (
+            <span className="ml-1 text-muted-foreground/70">
+              ({confirmedTypes.map(t => t === "carte" ? "Carte" : "Compte").join(" + ")} déjà confirmé{confirmedTypes.length > 1 ? "s" : ""})
+            </span>
+          )}
+        </p>
+      </div>
+    )
+  }
+
+  // ── Cas complet : carte + compte tous les deux confirmés ──────────────────
   const level: "red" | "orange" | "green" =
     gap > 500 || coverageRatio < 0.85 ? "red"    :
     gap > 100 || coverageRatio < 0.95 ? "orange" : "green"
 
-  const statusLabel  = level === "red" ? "Écart important" : level === "orange" ? "Couverture partielle" : "Exhaustif"
-  const statusColor  = level === "red"
+  const statusLabel = level === "red" ? "Écart important" : level === "orange" ? "À surveiller" : "Exhaustif"
+  const statusColor = level === "red"
     ? "bg-[var(--danger)]/10  text-[var(--danger)]"
     : level === "orange"
       ? "bg-[var(--warning)]/10 text-[var(--warning)]"
       : "bg-[var(--success)]/10 text-[var(--success)]"
-  const gapColor     = gap > 0
-    ? level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]"
+  const gapColor    = gap > 0
+    ? (level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]")
     : "text-[var(--success)]"
-
-  const periodLabel = `${MONTHS_FR_FULL[month - 1]} ${year}`
 
   return (
     <div className={cn(
       "rounded-lg border px-4 py-3 space-y-2",
       level === "red"    ? "border-[var(--danger)]/30  bg-[var(--danger)]/5"  :
       level === "orange" ? "border-[var(--warning)]/30 bg-[var(--warning)]/5" :
-      "border-[var(--success)]/30 bg-[var(--success)]/5",
+                           "border-[var(--success)]/30 bg-[var(--success)]/5",
     )}>
-      {/* Header */}
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-xs font-semibold text-foreground">
           Contrôle d&apos;exhaustivité — {periodLabel}
@@ -183,18 +224,18 @@ function CoverageBlock({ coverage }: { coverage: CoverageData }) {
             mois partiel
           </span>
         )}
+        <span className="text-[10px] text-muted-foreground">Carte + Compte</span>
         <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", statusColor)}>
           {statusLabel}
         </span>
       </div>
 
-      {/* Métriques */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
         {[
           { label: "Dépenses bancaires", value: formatEur(bankExpenses), color: "text-foreground" },
           { label: "Dépenses saisies",   value: formatEur(actualExpenses), color: "text-foreground" },
           { label: "Écart",              value: formatEur(gap), color: gapColor },
-          { label: "Couverture P&L",     value: `${pct}%`,  color: level === "green" ? "text-[var(--success)]" : level === "orange" ? "text-[var(--warning)]" : "text-[var(--danger)]" },
+          { label: "Couverture P&L",     value: `${pct}%`, color: level === "green" ? "text-[var(--success)]" : level === "orange" ? "text-[var(--warning)]" : "text-[var(--danger)]" },
         ].map(m => (
           <div key={m.label}>
             <p className="text-[10px] text-muted-foreground">{m.label}</p>
