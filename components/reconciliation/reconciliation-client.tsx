@@ -17,19 +17,15 @@ interface DrillTransaction {
   categoryBank: string | null
 }
 
-interface CoverageSubBlock {
-  bankExpenses:   number
-  actualExpenses: number
-  gap:            number
-  coverageRatio:  number
-}
-
 interface CoverageData {
   month:               number
   year:                number
   currentMonthPartial: boolean
-  carte:               CoverageSubBlock
-  compte:              CoverageSubBlock
+  bothTypesPresent:    boolean
+  bankExpenses:        number
+  actualExpenses:      number
+  gap:                 number
+  coverageRatio:       number
 }
 
 interface ImportData {
@@ -151,105 +147,101 @@ const MONTHS_FR_FULL = [
   "juil.", "août",  "sept.", "oct.", "nov.", "déc.",
 ]
 
-// ─── Sub-block panel ─────────────────────────────────────────────────────────
-
-function SubBlockPanel({
-  title,
-  subtitle,
-  block,
-}: {
-  title:    string
-  subtitle: string
-  block:    CoverageSubBlock
-}) {
-  const pct = Math.round(block.coverageRatio * 1000) / 10
-
-  const level: "red" | "orange" | "green" =
-    block.gap > 500 || block.coverageRatio < 0.85 ? "red"    :
-    block.gap > 100 || block.coverageRatio < 0.95 ? "orange" : "green"
-
-  const noData = block.bankExpenses === 0
-
-  const gapColor = noData ? "text-muted-foreground"
-    : block.gap > 0
-      ? (level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]")
-      : "text-[var(--success)]"
-
-  const badge = noData ? null : level === "green"
-    ? <span className="rounded bg-[var(--success)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--success)]">Exhaustif</span>
-    : level === "orange"
-      ? <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warning)]">À surveiller</span>
-      : <span className="rounded bg-[var(--danger)]/10  px-1.5 py-0.5 text-[10px] font-semibold text-[var(--danger)]">Écart important</span>
-
-  return (
-    <div className="rounded-lg border border-border bg-[var(--panel-background)] px-4 py-3 space-y-2 flex-1 min-w-[200px]">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold text-foreground">{title}</p>
-          <p className="text-[10px] text-muted-foreground">{subtitle}</p>
-        </div>
-        {badge}
-      </div>
-
-      {noData ? (
-        <p className="text-xs text-muted-foreground italic">Pas de données bancaires ce mois</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-          {[
-            { label: "Bancaire", value: formatEur(block.bankExpenses), color: "text-foreground" },
-            { label: "Saisi",    value: formatEur(block.actualExpenses), color: "text-foreground" },
-            { label: "Écart",    value: formatEur(block.gap), color: gapColor },
-            { label: "Couverture", value: `${pct}%`,
-              color: level === "green" ? "text-[var(--success)]"
-                   : level === "orange" ? "text-[var(--warning)]"
-                   : "text-[var(--danger)]" },
-          ].map(m => (
-            <div key={m.label}>
-              <p className="text-[10px] text-muted-foreground">{m.label}</p>
-              <p className={cn("text-sm font-bold tabular-nums", m.color)}>{m.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Bloc coverage principal ──────────────────────────────────────────────────
+// ─── Bloc coverage ────────────────────────────────────────────────────────────
 
 function CoverageBlock({ coverage }: { coverage: CoverageData }) {
-  const periodLabel = `${MONTHS_FR_FULL[coverage.month - 1]} ${coverage.year}`
+  const {
+    month, year, currentMonthPartial, bothTypesPresent,
+    bankExpenses, actualExpenses, gap, coverageRatio,
+  } = coverage
+
+  const periodLabel = `${MONTHS_FR_FULL[month - 1]} ${year}`
+  const pct = Math.round(coverageRatio * 1000) / 10
+
+  // Cas partiel : un seul CSV pour ce mois
+  if (!bothTypesPresent) {
+    return (
+      <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/5 px-4 py-3 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs font-semibold text-foreground">
+            Contrôle d&apos;exhaustivité — {periodLabel}
+          </p>
+          {currentMonthPartial && (
+            <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
+              mois partiel
+            </span>
+          )}
+          <span className="ml-auto rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--warning)]">
+            Couverture partielle
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Importez les deux relevés (Carte + Compte courant) pour un contrôle d&apos;exhaustivité complet.
+        </p>
+      </div>
+    )
+  }
+
+  // Cas complet
+  const level: "red" | "orange" | "green" =
+    gap > 500 || coverageRatio < 0.85 ? "red"    :
+    gap > 100 || coverageRatio < 0.95 ? "orange" : "green"
+
+  const statusLabel = level === "red" ? "Écart important" : level === "orange" ? "À surveiller" : "Exhaustif"
+  const statusColor = level === "red"
+    ? "bg-[var(--danger)]/10  text-[var(--danger)]"
+    : level === "orange"
+      ? "bg-[var(--warning)]/10 text-[var(--warning)]"
+      : "bg-[var(--success)]/10 text-[var(--success)]"
+  const gapColor = gap > 0
+    ? (level === "red" ? "text-[var(--danger)]" : "text-[var(--warning)]")
+    : "text-[var(--success)]"
 
   return (
-    <div className="space-y-2">
+    <div className={cn(
+      "rounded-lg border px-4 py-3 space-y-3",
+      level === "red"    ? "border-[var(--danger)]/30  bg-[var(--danger)]/5"  :
+      level === "orange" ? "border-[var(--warning)]/30 bg-[var(--warning)]/5" :
+                           "border-[var(--success)]/30 bg-[var(--success)]/5",
+    )}>
       {/* Header */}
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-xs font-semibold text-foreground">
           Contrôle d&apos;exhaustivité — {periodLabel}
         </p>
-        {coverage.currentMonthPartial && (
+        {currentMonthPartial && (
           <span className="rounded bg-[var(--warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warning)]">
             mois partiel
           </span>
         )}
+        <span className={cn("ml-auto rounded px-1.5 py-0.5 text-[10px] font-semibold", statusColor)}>
+          {statusLabel}
+        </span>
       </div>
 
-      {/* Deux panels côte à côte */}
-      <div className="flex flex-wrap gap-3">
-        <SubBlockPanel
-          title="Carte → Dépenses variables"
-          subtitle="Food · Leisure · Transport · Health · Personnel"
-          block={coverage.carte}
-        />
-        <SubBlockPanel
-          title="Compte → Dépenses fixes"
-          subtitle="Housing · Remboursements"
-          block={coverage.compte}
-        />
+      {/* Métriques */}
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4">
+        {[
+          { label: "Dépenses bancaires", value: formatEur(bankExpenses), color: "text-foreground" },
+          { label: "Dépenses saisies",   value: formatEur(actualExpenses), color: "text-foreground" },
+          { label: "Écart",              value: formatEur(gap), color: gapColor },
+          {
+            label: "Couverture",
+            value: `${pct}%`,
+            color: level === "green" ? "text-[var(--success)]"
+                 : level === "orange" ? "text-[var(--warning)]" : "text-[var(--danger)]",
+          },
+        ].map(m => (
+          <div key={m.label}>
+            <p className="text-[10px] text-muted-foreground">{m.label}</p>
+            <p className={cn("text-sm font-bold tabular-nums", m.color)}>{m.value}</p>
+          </div>
+        ))}
       </div>
 
-      <p className="text-[10px] text-muted-foreground">
-        Exclus du périmètre : Tax · Investment · Savings · Odd · Income (déduites à la source ou hors flux bancaire)
+      {/* Note taxes */}
+      <p className="text-[10px] text-muted-foreground border-t border-border/30 pt-2">
+        Saisies manuelles uniquement · Taxes exclues (prélevées à la source)
       </p>
     </div>
   )

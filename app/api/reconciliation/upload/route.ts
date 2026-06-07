@@ -13,43 +13,12 @@ import { getSupabaseUser, createSupabaseServerClient } from "@/lib/supabase/serv
 import { parseCSV } from "@/lib/csv/parsers"
 import { summarizeByBankCategory, computePeriod } from "@/lib/csv/summarize"
 
-// ── Périmètres du coverage bancaire ──────────────────────────────────────────
-//
-// CARTE → dépenses variables : transactions CB = Food, Leisure, Transport, Health, Personal
-// COMPTE → dépenses fixes    : virements/prélèvements = Housing, Debt Repayments
-//
-// Exclure complètement : Tax, Investment, Savings, Odd, Income
-// (déduites à la source ou hors périmètre bancaire direct)
-
-const CARTE_CATEGORIES = new Set([
-  "food",
-  "leisure",
-  "personal",
-  "shopping",
-  "transport",
-  "health",
-  "big & one-offs",
-  "big one-offs",
-  "one-off",
-  "gifts",
-  "gift",
-])
-
-const COMPTE_CATEGORIES = new Set([
-  "housing",
-  "debt",
-  "debt repayments",
-  "debt repayment",
-  "loan repayments",
-  "loan repayment",
-])
+// ── Coverage — catégories exclues ────────────────────────────────────────────
+// Tax / Taxes : prélevées à la source, jamais visibles en banque.
+const COVERAGE_EXCLUDED_CATS = new Set(["tax", "taxes"])
 
 function normCat(cat: string | null): string {
-  return (cat ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
+  return (cat ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "")
 }
 
 export async function POST(request: NextRequest) {
@@ -162,31 +131,29 @@ export async function POST(request: NextRequest) {
     categoryBank: t.categoryBank,
   }))
 
-  // ── Contrôle d'exhaustivité par périmètre ────────────────────────────────
+  // ── Contrôle d'exhaustivité ───────────────────────────────────────────────
   //
-  // CARTE  → bank_transactions[type=carte]  vs finance_entries CARTE_CATEGORIES
-  // COMPTE → bank_transactions[type=compte] vs finance_entries COMPTE_CATEGORIES
-  // Exclus (Tax, Investment, Odd, Income) → jamais comptabilisés.
-
-  type SubBlock = {
-    bankExpenses:   number
-    actualExpenses: number
-    gap:            number
-    coverageRatio:  number
-  }
+  // bankExpenses  = sum(abs(bank_transactions.amount < 0)) — tous types ce mois
+  // actualExpenses = sum(abs(finance_entries.amount))
+  //                 WHERE source='manual_saisie' AND scenario='actual'
+  //                 AND entry_type='expense' AND category NOT IN ('Tax','Taxes')
+  // Si les deux CSV présents → coverage complet.
+  // Si un seul → message "Couverture partielle".
 
   type Coverage = {
     month:               number
     year:                number
     currentMonthPartial: boolean
-    carte:               SubBlock
-    compte:              SubBlock
+    bothTypesPresent:    boolean  // carte + compte ont des bank_transactions ce mois
+    bankExpenses:        number
+    actualExpenses:      number
+    gap:                 number
+    coverageRatio:       number
   }
 
   let coverage: Coverage | null = null
 
   if (debits.length > 0) {
-    // Mois primaire
     const monthSums = new Map<string, number>()
     for (const t of debits) {
       monthSums.set(t.date.slice(0, 7), (monthSums.get(t.date.slice(0, 7)) ?? 0) + Math.abs(t.amount))
@@ -200,7 +167,7 @@ export async function POST(request: NextRequest) {
       const dateMin = `${txYear}-${String(txMonth).padStart(2,"0")}-01`
       const dateMax = `${txYear}-${String(txMonth).padStart(2,"0")}-31`
 
-      // Req 1 : bank_transactions du mois
+      // Req 1 : bank_transactions du mois (tous types)
       const { data: btMonth } = await supabase
         .from("bank_transactions")
         .select("import_id, amount")
@@ -209,37 +176,31 @@ export async function POST(request: NextRequest) {
         .lte("date", dateMax)
 
       const monthImportIds = [...new Set((btMonth ?? []).map(r => r.import_id as string))]
+      const bankExpenses   = Math.round(
+        (btMonth ?? [])
+          .filter(r => Number(r.amount) < 0)
+          .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+      ) / 100
 
-      // Req 2 : types des imports
-      const importTypeMap = new Map<string, string>()
+      // Req 2 : vérifier si les deux types (carte + compte) sont présents
+      let bothTypesPresent = false
       if (monthImportIds.length > 0) {
         const { data: importsData } = await supabase
           .from("csv_imports")
-          .select("id, type")
+          .select("type")
           .in("id", monthImportIds)
           .eq("user_id", user.id)
-        for (const i of importsData ?? []) {
-          importTypeMap.set(i.id as string, i.type as string)
-        }
+        const types = new Set((importsData ?? []).map(i => i.type as string))
+        bothTypesPresent = types.has("carte") && types.has("compte")
       }
 
-      const btRows = btMonth ?? []
-      const sumDebits = (type: string) =>
-        Math.round(
-          btRows
-            .filter(r => Number(r.amount) < 0 && importTypeMap.get(r.import_id as string) === type)
-            .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
-        ) / 100
-
-      const carteDebits  = sumDebits("carte")
-      const compteDebits = sumDebits("compte")
-
-      // Req 3 : finance_entries actual du mois (category incluse)
+      // Req 3 : saisies manuelles (source='manual_saisie') — hors Tax/Taxes
       const { data: feData, error: feError } = await supabase
         .from("finance_entries")
         .select("amount, category")
         .eq("user_id",     user.id)
         .eq("scenario",    "actual")
+        .eq("source",      "manual_saisie")
         .eq("entry_type",  "expense")
         .eq("is_non_cash", false)
         .eq("is_subtotal", false)
@@ -248,37 +209,28 @@ export async function POST(request: NextRequest) {
         .or("sync_status.neq.deleted,sync_status.is.null")
 
       if (!feError && feData) {
-        const sumFe = (set: Set<string>) =>
-          Math.round(
-            feData
-              .filter(r => set.has(normCat(r.category as string | null)))
-              .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
-          ) / 100
+        const actualExpenses = Math.round(
+          feData
+            .filter(r => !COVERAGE_EXCLUDED_CATS.has(normCat(r.category as string | null)))
+            .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+        ) / 100
 
-        const carteActual  = sumFe(CARTE_CATEGORIES)
-        const compteActual = sumFe(COMPTE_CATEGORIES)
-
-        const block = (bank: number, actual: number): SubBlock => ({
-          bankExpenses:   bank,
-          actualExpenses: actual,
-          gap:            Math.round((bank - actual) * 100) / 100,
-          coverageRatio:  bank > 0 ? Math.round((actual / bank) * 1000) / 1000 : 0,
-        })
+        const gap           = Math.round((bankExpenses - actualExpenses) * 100) / 100
+        const coverageRatio = bankExpenses > 0
+          ? Math.round((actualExpenses / bankExpenses) * 1000) / 1000
+          : 0
 
         const now = new Date()
-        const currentMonthPartial =
-          txMonth === (now.getMonth() + 1) && txYear === now.getFullYear()
-
         coverage = {
-          month: txMonth, year: txYear, currentMonthPartial,
-          carte:  block(carteDebits,  carteActual),
-          compte: block(compteDebits, compteActual),
+          month: txMonth, year: txYear,
+          currentMonthPartial: txMonth === (now.getMonth() + 1) && txYear === now.getFullYear(),
+          bothTypesPresent,
+          bankExpenses, actualExpenses, gap, coverageRatio,
         }
 
         console.log(
-          `[coverage] ${txYear}-M${txMonth}` +
-          ` carte: bank=${carteDebits}€ actual=${carteActual}€ gap=${coverage.carte.gap}€` +
-          ` compte: bank=${compteDebits}€ actual=${compteActual}€ gap=${coverage.compte.gap}€`,
+          `[coverage] ${txYear}-M${txMonth} both=${bothTypesPresent}` +
+          ` bank=${bankExpenses}€ actual=${actualExpenses}€ gap=${gap}€ ratio=${(coverageRatio * 100).toFixed(1)}%`,
         )
       }
     }
