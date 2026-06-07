@@ -156,9 +156,11 @@ export async function POST(request: NextRequest) {
       const bankExpenses = Math.round((monthSums.get(primaryKey) ?? 0) * 100) / 100
 
       // Fetch finance_entries actual expenses pour ce mois
+      // user_id explicite en plus de RLS pour garantir l'isolation
       const { data: feData, error: feError } = await supabase
         .from("finance_entries")
-        .select("amount")
+        .select("amount, entry_type, scenario")
+        .eq("user_id",     user.id)
         .eq("scenario",    "actual")
         .eq("entry_type",  "expense")
         .eq("is_non_cash", false)
@@ -168,9 +170,21 @@ export async function POST(request: NextRequest) {
         .or("sync_status.neq.deleted,sync_status.is.null")
 
       if (!feError && feData) {
-        const actualExpenses = Math.round(
-          feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
-        ) / 100
+        // Debug : vérifier les filtres en loggant count + sommes
+        const sumRaw = feData.reduce((s, r) => s + Number(r.amount), 0)
+        const sumAbs = feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0)
+        console.log(
+          `[reconciliation/upload] coverage finance_entries:` +
+          ` count=${feData.length} sum_raw=${sumRaw.toFixed(2)} sum_abs=${sumAbs.toFixed(2)}` +
+          ` month=${txMonth} year=${txYear}`,
+        )
+
+        // Vérification des scénarios présents (ne doit voir que "actual")
+        const scenarios = [...new Set(feData.map(r => r.scenario as string))]
+        const types     = [...new Set(feData.map(r => r.entry_type as string))]
+        console.log(`[reconciliation/upload] scenarios=${JSON.stringify(scenarios)} entry_types=${JSON.stringify(types)}`)
+
+        const actualExpenses = Math.round(sumAbs * 100) / 100
 
         const gap           = Math.round((bankExpenses - actualExpenses) * 100) / 100
         const coverageRatio = bankExpenses > 0

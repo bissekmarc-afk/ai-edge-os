@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useRef, useState, useCallback, useEffect, useMemo } from "react"
-import { Upload, Loader2, RotateCcw, Check, ChevronDown, ChevronRight } from "lucide-react"
+import { Upload, Loader2, RotateCcw, Check, ChevronDown, ChevronRight, Trash2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -412,13 +412,29 @@ function ImportHistoryCard({
   loadingDetail,
   detail,
   onExpand,
+  onDeleted,
 }: {
   imp:           HistoryImport
   expanded:      boolean
   loadingDetail: boolean
   detail:        DbTransactionRow[] | null
   onExpand:      (id: string) => void
+  onDeleted:     () => void
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleting, setDeleting]           = useState(false)
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation()
+    setDeleting(true)
+    try {
+      await fetch(`/api/reconciliation/import/${imp.id}`, { method: "DELETE" })
+      onDeleted()
+    } finally {
+      setDeleting(false)
+      setConfirmDelete(false)
+    }
+  }
   const debitTotal = detail
     ? Math.round(
         detail
@@ -459,7 +475,38 @@ function ImportHistoryCard({
               : ""}
           </p>
         </div>
-        <p className="shrink-0 text-xs text-muted-foreground">{formatDateTime(imp.uploadedAt)}</p>
+        <div className="shrink-0 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+          <p className="text-xs text-muted-foreground">{formatDateTime(imp.uploadedAt)}</p>
+
+          {confirmDelete ? (
+            <div className="flex items-center gap-1.5 rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-2 py-1 text-xs">
+              <span className="text-muted-foreground whitespace-nowrap">
+                Supprimer {imp.stats?.total ?? imp.rowCount} tx ?
+              </span>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-[var(--danger)] text-white hover:opacity-90 disabled:opacity-50"
+              >
+                {deleting ? "…" : "Oui"}
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
+              >
+                Non
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              aria-label="Supprimer cet import"
+              className="flex size-6 items-center justify-center rounded text-muted-foreground/30 transition-colors hover:bg-[var(--danger)]/10 hover:text-[var(--danger)]"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          )}
+        </div>
       </button>
 
       {expanded && (
@@ -523,7 +570,11 @@ function ImportHistoryCard({
 
 // ─── Section historique ───────────────────────────────────────────────────────
 
-function ImportHistory({ history, loading }: { history: HistoryImport[]; loading: boolean }) {
+function ImportHistory({ history, loading, onRefresh }: {
+  history:   HistoryImport[]
+  loading:   boolean
+  onRefresh: () => void
+}) {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [loadingId, setLoadingId]   = useState<string | null>(null)
   const [details, setDetails]       = useState<Record<string, DbTransactionRow[]>>({})
@@ -566,6 +617,7 @@ function ImportHistory({ history, loading }: { history: HistoryImport[]; loading
           loadingDetail={loadingId === imp.id}
           detail={details[imp.id] ?? null}
           onExpand={handleExpand}
+          onDeleted={onRefresh}
         />
       ))}
     </div>
@@ -732,7 +784,7 @@ export function ReconciliationClient() {
         {/* Historique */}
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-foreground">Historique des imports</h3>
-          <ImportHistory history={history} loading={historyLoading} />
+          <ImportHistory history={history} loading={historyLoading} onRefresh={loadHistory} />
         </div>
       </div>
     )
@@ -753,7 +805,7 @@ export function ReconciliationClient() {
       {(historyLoading || history.length > 0) && (
         <div className="space-y-3">
           <h3 className="text-sm font-semibold text-foreground">Historique des imports</h3>
-          <ImportHistory history={history} loading={historyLoading} />
+          <ImportHistory history={history} loading={historyLoading} onRefresh={loadHistory} />
         </div>
       )}
     </div>
