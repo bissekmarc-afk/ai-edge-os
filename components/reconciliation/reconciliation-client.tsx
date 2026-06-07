@@ -21,12 +21,14 @@ interface CoverageData {
   month:               number
   year:                number
   bankExpenses:        number
-  actualExpenses:      number
+  actualExpenses:      number    // hors taxes à la source
   gap:                 number
   coverageRatio:       number
   currentMonthPartial: boolean
-  bothTypesConfirmed:  boolean    // true = carte + compte confirmés → coverage fiable
-  confirmedTypes:      string[]   // ex: ["carte"] ou ["carte","compte"]
+  bothTypesConfirmed:  boolean
+  confirmedTypes:      string[]
+  excludedAmount:      number    // montant exclu (taxes à la source)
+  excludedLabels:      string[]  // catégories exclues
 }
 
 interface ImportData {
@@ -152,6 +154,7 @@ function CoverageBlock({ coverage }: { coverage: CoverageData }) {
   const {
     month, year, bankExpenses, actualExpenses, gap, coverageRatio,
     currentMonthPartial, bothTypesConfirmed, confirmedTypes,
+    excludedAmount, excludedLabels,
   } = coverage
 
   const pct         = Math.round(coverageRatio * 1000) / 10
@@ -243,6 +246,20 @@ function CoverageBlock({ coverage }: { coverage: CoverageData }) {
           </div>
         ))}
       </div>
+
+      {/* Note : catégories exclues du calcul (taxes à la source) */}
+      {excludedAmount > 0 && (
+        <p className="text-[10px] text-muted-foreground border-t border-border/30 pt-2">
+          ℹ️ Taxes exclues (prélevées à la source) :{" "}
+          <span className="font-medium">{formatEur(excludedAmount)}</span>
+          {excludedLabels.length > 0 && (
+            <span className="ml-1 opacity-60">
+              ({excludedLabels.join(", ")})
+            </span>
+          )}
+          {" — "}non comptabilisées dans l&apos;écart car sans transaction bancaire.
+        </p>
+      )}
     </div>
   )
 }

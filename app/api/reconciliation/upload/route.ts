@@ -13,6 +13,36 @@ import { getSupabaseUser, createSupabaseServerClient } from "@/lib/supabase/serv
 import { parseCSV } from "@/lib/csv/parsers"
 import { summarizeByBankCategory, computePeriod } from "@/lib/csv/summarize"
 
+// ── Catégories exclues du coverage bancaire ───────────────────────────────────
+//
+// Ces catégories représentent des charges déduites avant ou à la source :
+//   - Cotisations sociales → déduites du salaire brut, jamais visibles en banque
+//   - Impôt sur le revenu → prélèvement à la source, pas de virement sortant
+//
+// Elles sont bien dans finance_entries actual (pour le P&L complet) mais n'ont
+// pas de transaction bancaire correspondante → fausseraient le gap coverage.
+
+const EXCLUDED_FROM_COVERAGE_NORMALIZED = new Set([
+  "tax",
+  "taxes",
+  "cotisations sociales",
+  "cotisation sociale",
+  "impot revenue",
+  "impot revenu",
+])
+
+function normalizeForCoverage(cat: string | null): string {
+  return (cat ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+}
+
+function isExcludedFromCoverage(category: string | null): boolean {
+  return EXCLUDED_FROM_COVERAGE_NORMALIZED.has(normalizeForCoverage(category))
+}
+
 export async function POST(request: NextRequest) {
   console.log("[reconciliation/upload] ── POST reçu ──")
 
@@ -152,6 +182,8 @@ export async function POST(request: NextRequest) {
     currentMonthPartial: boolean
     bothTypesConfirmed:  boolean  // false → afficher message partiel
     confirmedTypes:      string[] // ex: ["carte"] ou ["carte","compte"]
+    excludedAmount:      number   // montant des catégories exclues (taxes à la source)
+    excludedLabels:      string[] // noms des catégories exclues trouvées
   }
 
   let coverage: Coverage | null = null
@@ -234,9 +266,10 @@ export async function POST(request: NextRequest) {
         : (monthSums.get(primaryKey) ?? 0)  // provisoire : juste ce CSV
 
       // ── Req 3 : finance_entries actual/expense du mois ──────────────────
+      // On sélectionne 'category' pour filtrer les charges à la source.
       const { data: feData, error: feError } = await supabase
         .from("finance_entries")
-        .select("amount")
+        .select("amount, category")
         .eq("user_id",     user.id)
         .eq("scenario",    "actual")
         .eq("entry_type",  "expense")
@@ -247,9 +280,19 @@ export async function POST(request: NextRequest) {
         .or("sync_status.neq.deleted,sync_status.is.null")
 
       if (!feError && feData) {
+        // Séparer les lignes incluses et exclues (taxes à la source)
+        const included = feData.filter(r => !isExcludedFromCoverage(r.category as string | null))
+        const excluded = feData.filter(r =>  isExcludedFromCoverage(r.category as string | null))
+
         const actualExpenses = Math.round(
-          feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+          included.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
         ) / 100
+        const excludedAmount = Math.round(
+          excluded.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+        ) / 100
+        const excludedLabels = [
+          ...new Set(excluded.map(r => (r.category as string | null) ?? "").filter(Boolean)),
+        ]
 
         const gap           = Math.round((bankExpenses - actualExpenses) * 100) / 100
         const coverageRatio = bankExpenses > 0
@@ -264,10 +307,12 @@ export async function POST(request: NextRequest) {
           month: txMonth, year: txYear,
           bankExpenses, actualExpenses, gap, coverageRatio,
           currentMonthPartial, bothTypesConfirmed, confirmedTypes,
+          excludedAmount, excludedLabels,
         }
 
         console.log(
           `[coverage] result: bank=${bankExpenses}€ actual=${actualExpenses}€` +
+          ` excluded=${excludedAmount}€ (${excludedLabels.join(",")})` +
           ` gap=${gap}€ ratio=${(coverageRatio * 100).toFixed(1)}%`,
         )
       }
