@@ -239,9 +239,8 @@ function CoverageBlock({ coverage }: { coverage: CoverageData }) {
         ))}
       </div>
 
-      {/* Note taxes */}
       <p className="text-[10px] text-muted-foreground border-t border-border/30 pt-2">
-        Saisies manuelles uniquement · Taxes exclues (prélevées à la source)
+        Saisies manuelles (source=manual_saisie) uniquement
       </p>
     </div>
   )

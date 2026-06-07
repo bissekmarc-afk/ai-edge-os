@@ -13,13 +13,6 @@ import { getSupabaseUser, createSupabaseServerClient } from "@/lib/supabase/serv
 import { parseCSV } from "@/lib/csv/parsers"
 import { summarizeByBankCategory, computePeriod } from "@/lib/csv/summarize"
 
-// ── Coverage — catégories exclues ────────────────────────────────────────────
-// Tax / Taxes : prélevées à la source, jamais visibles en banque.
-const COVERAGE_EXCLUDED_CATS = new Set(["tax", "taxes"])
-
-function normCat(cat: string | null): string {
-  return (cat ?? "").trim().toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "")
-}
 
 export async function POST(request: NextRequest) {
   console.log("[reconciliation/upload] ── POST reçu ──")
@@ -194,10 +187,10 @@ export async function POST(request: NextRequest) {
         bothTypesPresent = types.has("carte") && types.has("compte")
       }
 
-      // Req 3 : saisies manuelles (source='manual_saisie') — hors Tax/Taxes
+      // Req 3 : saisies manuelles (source='manual_saisie') — toutes catégories incluses
       const { data: feData, error: feError } = await supabase
         .from("finance_entries")
-        .select("amount, category")
+        .select("amount")
         .eq("user_id",     user.id)
         .eq("scenario",    "actual")
         .eq("source",      "manual_saisie")
@@ -210,9 +203,7 @@ export async function POST(request: NextRequest) {
 
       if (!feError && feData) {
         const actualExpenses = Math.round(
-          feData
-            .filter(r => !COVERAGE_EXCLUDED_CATS.has(normCat(r.category as string | null)))
-            .reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
+          feData.reduce((s, r) => s + Math.abs(Number(r.amount)), 0) * 100,
         ) / 100
 
         const gap           = Math.round((bankExpenses - actualExpenses) * 100) / 100
