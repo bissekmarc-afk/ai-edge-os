@@ -290,12 +290,13 @@ function VarianceTableBody({
           </td>
           <td
             className={cn(
-              "px-4 py-2 text-right tabular-nums font-mono",
-              row.varianceEur > 0 && row.entryType === "income"  && "text-[var(--success)]",
-              row.varianceEur < 0 && row.entryType === "income"  && "text-[var(--danger)]",
-              row.varianceEur > 0 && row.entryType === "expense" && "text-[var(--danger)]",
-              row.varianceEur < 0 && row.entryType === "expense" && "text-[var(--success)]",
-              row.varianceEur === 0                               && "text-muted-foreground",
+              "px-4 py-2 text-right tabular-nums font-mono font-medium",
+              // Convention FP&A : couleur = statut sémantique, pas signe mathématique
+              // expense : négatif (économie) = VERT | positif (sur-dépense) = ROUGE
+              // income  : positif (surplus)  = VERT | négatif (sous-recette) = ROUGE
+              row.status === "favourable"                            && "text-[var(--success)]",
+              row.status === "unfavourable"                          && "text-[var(--danger)]",
+              (row.status === "ok" || row.status === "na")           && "text-muted-foreground",
             )}
           >
             {fmtSigned(row.varianceEur)}
