@@ -127,16 +127,6 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* ── Reference month badge ──────────────────────────────────────── */}
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Mois de référence
-        </span>
-        <span className="rounded-full bg-[var(--ai-accent-soft)] px-2.5 py-0.5 text-xs font-semibold text-[var(--ai-accent)]">
-          {monthName(month, year)}
-        </span>
-      </div>
-
       {/* ── FY Forecast — visible for all scenarios ────────────────────── */}
       <FYForecastCard
         year={year}
@@ -144,15 +134,11 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
         currentYear={currentYear}
       />
 
-      {/* ── Variance Table — only when scenario === 'variance' ─────────── */}
-      {scenario === "variance" && (
-        <VarianceTable
-          month={month}
-          year={year}
-          currentMonth={currentMonth}
-          currentYear={currentYear}
-        />
-      )}
+      {/* ── Variance YTD + MTD — toujours visibles ─────────────────────── */}
+      <VarianceTable
+        currentMonth={currentMonth}
+        currentYear={currentYear}
+      />
 
       {/* ── Alerts ────────────────────────────────────────────────────── */}
       <FinanceAlerts pl={pl} />
