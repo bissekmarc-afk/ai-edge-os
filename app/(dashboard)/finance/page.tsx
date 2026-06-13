@@ -16,6 +16,8 @@ import { getLastDataMonth, getMonthRows, getYearRows, getNonCashRows } from "@/l
 import { computePL, computeYearSummaries, computeBalanceSheet, monthName } from "@/lib/finance/aggregations"
 import { getLatestWealthSnapshots } from "@/lib/queries/finance-dashboard"
 import { BalanceSheetSection } from "@/components/finance/balance-sheet-section"
+import { PatrimonyTrajectory } from "@/components/finance/PatrimonyTrajectory"
+import { buildTrajectoryContext } from "@/lib/finance/trajectory-utils"
 import type { ScenarioValue } from "@/components/finance/ScenarioToggle"
 
 // ─── searchParams type (Next.js 15/16 — Promise-based) ───────────────────────
@@ -108,6 +110,13 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
   const yearlySummaries = computeYearSummaries(yearRows, year)
   const balanceSheet    = computeBalanceSheet(nonCashRows, month, year, prevNonCashRows)
 
+  // Trajectoire patrimoniale — calculée côté serveur, zéro fetch additionnel
+  // capex = épargne/investissement mensuel du mois courant (proxy épargne actuelle)
+  const trajectoryCtx = buildTrajectoryContext(
+    balanceSheet.netWorth,
+    pl.capex,
+  )
+
   // For budget/reforecast, the chart must not show empty Jan-Apr bars.
   // computeYearSummaries always produces 12 slots — trim the dead ones here.
   const chartData =
@@ -172,6 +181,21 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
         bs={balanceSheet}
         recurringNetIncome={pl.recurringIncome - pl.taxes}
       />
+
+      {/* ── Trajectoire patrimoniale ──────────────────────────────────── */}
+      {trajectoryCtx && (
+        <PatrimonyTrajectory
+          netWorth={trajectoryCtx.netWorth}
+          savingsCurrent={trajectoryCtx.savingsCurrent}
+          nextMilestone={trajectoryCtx.nextMilestone}
+          allMilestones={trajectoryCtx.allMilestones}
+          coverageRatio={trajectoryCtx.coverageRatio}
+          status={trajectoryCtx.status}
+          gap={trajectoryCtx.gap}
+          monthsRemaining={trajectoryCtx.monthsRemaining}
+          requiredMonthlySavings={trajectoryCtx.requiredMonthlySavings}
+        />
+      )}
     </div>
   )
 }
