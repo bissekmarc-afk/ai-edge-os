@@ -147,27 +147,43 @@ export async function POST(request: NextRequest) {
   let coverage: Coverage | null = null
 
   if (debits.length > 0) {
-    const monthSums = new Map<string, number>()
-    for (const t of debits) {
-      monthSums.set(t.date.slice(0, 7), (monthSums.get(t.date.slice(0, 7)) ?? 0) + Math.abs(t.amount))
+    // Derive the primary month from the filename end-date token (most reliable).
+    // SG filenames embed two DDMMYYYY dates: e.g. carte_2267_29052026_26062026.csv
+    // or 76543210_27052026_25062026.csv.  The last 8-digit group is the end date.
+    // Fall back to the last transaction date when the filename has no such token.
+    let primaryKey: string | undefined
+    const dateTokens = filename.match(/\d{8}/g)
+    if (dateTokens && dateTokens.length >= 2) {
+      const endToken = dateTokens.at(-1)!          // e.g. "26062026"
+      const endMonth = endToken.slice(2, 4)         // "06"
+      const endYear  = endToken.slice(4, 8)         // "2026"
+      primaryKey = `${endYear}-${endMonth}`         // "2026-06"
     }
-    const primaryKey = [...monthSums.entries()].sort((a, b) => b[1] - a[1])[0]?.[0]
+    if (!primaryKey) {
+      const lastDate = debits.map(t => t.date).sort().at(-1)
+      primaryKey = lastDate?.slice(0, 7)
+    }
 
     if (primaryKey) {
       const [yearStr, monthStr] = primaryKey.split("-")
       const txMonth = parseInt(monthStr, 10)
       const txYear  = parseInt(yearStr,  10)
-      const dateMin = `${txYear}-${String(txMonth).padStart(2,"0")}-01`
-      const dateMax = `${txYear}-${String(txMonth).padStart(2,"0")}-31`
+      console.log("[coverage] mois détecté:", txMonth, txYear)
+      const mm      = String(txMonth).padStart(2, "0")
+      const lastDay = new Date(txYear, txMonth, 0).getDate() // day-0 of next month = last day of txMonth
+      const dateMin = `${txYear}-${mm}-01`
+      const dateMax = `${txYear}-${mm}-${String(lastDay).padStart(2, "0")}`
+      console.log("[coverage] plage:", dateMin, "→", dateMax)
 
       // Req 1 : bank_transactions du mois (tous types)
-      const { data: btMonth } = await supabase
+      const { data: btMonth, error: btError } = await supabase
         .from("bank_transactions")
         .select("import_id, amount")
         .eq("user_id", user.id)
         .gte("date", dateMin)
         .lte("date", dateMax)
 
+      if (btError) console.error("[coverage] Req1 error:", btError.message)
       const monthImportIds = [...new Set((btMonth ?? []).map(r => r.import_id as string))]
       const bankExpenses   = Math.round(
         (btMonth ?? [])
@@ -184,6 +200,7 @@ export async function POST(request: NextRequest) {
           .in("id", monthImportIds)
           .eq("user_id", user.id)
         const types = new Set((importsData ?? []).map(i => i.type as string))
+        console.log("[coverage] imports confirmés:", [...types])
         bothTypesPresent = types.has("carte") && types.has("compte")
       }
 
