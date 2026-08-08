@@ -98,17 +98,31 @@ async function FinanceDashboard({ scenario }: { scenario: ScenarioValue }) {
   // We also fetch budget_initial rows separately whenever the primary scenario
   // is not budget_initial, so the chart can draw a dashed "Budget (cumul)"
   // reference line alongside the actual/reforecast cash-position curve.
-  const [monthRows, yearRows, budgetYearRows, wealthAssets, nonCashRows, prevNonCashRows] = await Promise.all([
+  const [monthRows, yearRows, budgetYearRows, actualYearRows, wealthAssets, nonCashRows, prevNonCashRows] = await Promise.all([
     getMonthRows(month, year, dbScenario),
     getYearRows(year, dbScenario),
     dbScenario !== "budget_initial" ? getYearRows(year, "budget_initial") : Promise.resolve([]),
+    // Actual rows needed to fill closed months when viewing the reforecast chart
+    dbScenario === "reforecast_6m"  ? getYearRows(year, "actual")         : Promise.resolve([]),
     getLatestWealthSnapshots(),
     getNonCashRows(month, year),
     getNonCashRows(prevM, prevY),
   ])
 
-  const pl              = computePL(monthRows)
-  const yearlySummaries = computeYearSummaries(yearRows, year)
+  const pl = computePL(monthRows)
+
+  // In reforecast_6m mode, blend actual data for closed months (< currentMonth)
+  // with reforecast data for the current and future months (>= currentMonth).
+  // This prevents the chart from showing 0€ bars for May-July.
+  const chartYearRows =
+    dbScenario === "reforecast_6m"
+      ? [
+          ...actualYearRows.filter(r => (r.month ?? 0) < currentMonth),
+          ...yearRows.filter(r => (r.month ?? 0) >= currentMonth),
+        ]
+      : yearRows
+
+  const yearlySummaries = computeYearSummaries(chartYearRows, year)
   const balanceSheet    = computeBalanceSheet(nonCashRows, month, year, prevNonCashRows)
 
   // Trajectoire patrimoniale — calculée côté serveur, zéro fetch additionnel
