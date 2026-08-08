@@ -47,7 +47,8 @@ export function AIDailyBrief() {
           if (done || cancelled) break
           setContent((prev) => prev + decoder.decode(value, { stream: true }))
         }
-      } catch {
+      } catch (err) {
+        console.error("[ai-daily-brief] fetch error:", err)
         if (!cancelled) {
           setError("Impossible de joindre l'API Claude.")
           setLoading(false)

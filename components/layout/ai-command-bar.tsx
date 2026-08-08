@@ -120,7 +120,8 @@ export function AICommandBar({ marginLeft }: AICommandBarProps) {
 
       // Analyse la conversation pour proposer des souvenirs
       if (text) fetchMemorySuggestions(prompt, text)
-    } catch {
+    } catch (err) {
+      console.error("[ai-command-bar] fetch error:", err)
       setResponse("Impossible de joindre l'API Claude.")
       setIsTyping(false)
     }

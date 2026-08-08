@@ -2,7 +2,8 @@ import { Suspense }   from "react"
 import Link            from "next/link"
 import { Plus }        from "lucide-react"
 import { SectionHeading }    from "@/components/shared/section-heading"
-import { ResetResyncButton } from "@/components/finance/reset-resync-button"
+import { ResetResyncButton }        from "@/components/finance/reset-resync-button"
+import { GenerateReforecastButton } from "@/components/finance/GenerateReforecastButton"
 import { buttonVariants }    from "@/components/ui/button"
 import { PLStatementCard }   from "@/components/finance/pl-statement-card"
 import { FinanceKpiCards }   from "@/components/finance/finance-kpi-cards"
@@ -220,6 +221,7 @@ export default async function FinancePage(props: {
               <Plus className="size-3.5" />
               Saisir
             </Link>
+            {scenario === "reforecast_6m" && <GenerateReforecastButton />}
             <ResetResyncButton />
           </div>
         }

@@ -116,7 +116,9 @@ export async function POST(request: Request) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY
+  console.log("[claude/command] ANTHROPIC_API_KEY définie:", !!apiKey, "longueur:", apiKey?.length ?? 0)
   if (!apiKey || apiKey === "your_anthropic_api_key_here") {
+    console.error("[claude/command] Clé API manquante ou placeholder")
     return Response.json({ error: "ANTHROPIC_API_KEY non configurée" }, { status: 503 })
   }
 
@@ -157,25 +159,42 @@ export async function POST(request: Request) {
     wealthJson,
   )
 
-  const stream = await client.messages.stream({
-    model:      "claude-sonnet-4-6",
-    max_tokens: 2048,
-    system:     systemPrompt,
-    messages:   [{ role: "user", content: query }],
-  })
+  let stream: Awaited<ReturnType<typeof client.messages.stream>>
+  try {
+    stream = await client.messages.stream({
+      model:      "claude-sonnet-4-6",
+      max_tokens: 2048,
+      system:     systemPrompt,
+      messages:   [{ role: "user", content: query }],
+    })
+  } catch (err) {
+    const status  = (err as { status?: number }).status  ?? 0
+    const message = (err as { message?: string }).message ?? String(err)
+    console.error(`[claude/command] Anthropic API error — status=${status} message=${message}`)
+    return Response.json(
+      { error: `Erreur Anthropic (${status || "réseau"}) : ${message}` },
+      { status: 502 },
+    )
+  }
 
   const readable = new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder()
-      for await (const chunk of stream) {
-        if (
-          chunk.type === "content_block_delta" &&
-          chunk.delta.type === "text_delta"
-        ) {
-          controller.enqueue(encoder.encode(chunk.delta.text))
+      try {
+        for await (const chunk of stream) {
+          if (
+            chunk.type === "content_block_delta" &&
+            chunk.delta.type === "text_delta"
+          ) {
+            controller.enqueue(encoder.encode(chunk.delta.text))
+          }
         }
+      } catch (err) {
+        const message = (err as { message?: string }).message ?? String(err)
+        console.error("[claude/command] Erreur pendant le streaming:", message)
+      } finally {
+        controller.close()
       }
-      controller.close()
     },
     async cancel() {
       await stream.finalMessage().catch(() => {})
